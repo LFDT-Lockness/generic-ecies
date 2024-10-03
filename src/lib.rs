@@ -13,7 +13,7 @@ pub struct PrivateKey<E: Curve> {
     pub scalar: generic_ec::SecretScalar<E>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct PublicKey<E: Curve> {
     /// `Q` in the standard
     pub point: generic_ec::Point<E>,
@@ -32,6 +32,14 @@ impl<E: Curve> PrivateKey<E> {
         let scalar = generic_ec::SecretScalar::new(&mut scalar);
         Self { scalar }
     }
+    pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Option<Self> {
+        let mut scalar = generic_ec::Scalar::<E>::from_be_bytes(bytes).ok()?;
+        let scalar = generic_ec::SecretScalar::new(&mut scalar);
+        Some(Self { scalar })
+    }
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.scalar.as_ref().to_be_bytes().to_vec()
+    }
 
     pub fn public_key(&self) -> PublicKey<E> {
         let point = generic_ec::Point::generator() * &self.scalar;
@@ -40,6 +48,14 @@ impl<E: Curve> PrivateKey<E> {
 }
 
 impl<E: Curve> PublicKey<E> {
+    pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Option<Self> {
+        let point = generic_ec::Point::<E>::from_bytes(bytes).ok()?;
+        Some(Self { point })
+    }
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.point.to_bytes(true).to_vec()
+    }
+
     pub fn stream_encrypt_in_place<'m, Mac, Enc>(
         &self,
         message: &'m mut [u8],

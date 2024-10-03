@@ -84,4 +84,19 @@ mod test {
         let restored = super::EncryptedMessage::from_bytes(&mut message_bytes).unwrap();
         assert_eq!(message, restored);
     }
+
+    #[test]
+    fn key_encode() {
+        let mut rng = rand_dev::DevRng::new();
+
+        let key = super::PrivateKey::generate(&mut rng);
+        let key_bytes = key.to_bytes();
+        let key_ = super::PrivateKey::from_bytes(&key_bytes).unwrap();
+        assert_eq!(key.scalar.as_ref(), key_.scalar.as_ref());
+
+        let pubkey = key.public_key();
+        let key_bytes = pubkey.to_bytes();
+        let pubkey_ = super::PublicKey::from_bytes(&key_bytes).unwrap();
+        assert_eq!(pubkey, pubkey_);
+    }
 }
