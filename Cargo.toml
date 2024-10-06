@@ -16,11 +16,13 @@ thiserror = "1"
 
 salsa20 = { version = "0.10", optional = true }
 hmac = { version = "0.12", optional = true }
+zeroize = { version = "1.8", optional = true }
 
 [dev-dependencies]
+hex = "0.4.3"
 rand_dev = "0.1"
 
 [features]
 default = ["curve25519xsalsa20hmac"]
 
-curve25519xsalsa20hmac = ["dep:salsa20", "generic-ec/curve-ed25519", "dep:hmac"]
+curve25519xsalsa20hmac = ["dep:salsa20", "generic-ec/curve-ed25519", "dep:hmac", "dep:zeroize"]

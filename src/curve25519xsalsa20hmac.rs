@@ -23,6 +23,29 @@ impl PrivateKey {
     ) -> Result<&'m mut [u8], crate::DecError> {
         self.stream_decrypt_in_place::<Mac, Enc>(message)
     }
+
+    /// Since eddsa secret key is not a scalar, and most tools that call
+    /// themselves ed25519 are actually eddsa, we need to convert from eddsa key
+    /// to a scalar.
+    pub fn from_eddsa_pkey_bytes(bytes: &[u8]) -> Self {
+        use sha2::Digest as _;
+        let scalar_bytes = sha2::Sha512::new().chain_update(bytes).finalize();
+        let mut scalar_bytes = zeroize::Zeroizing::<[u8; 64]>::new(scalar_bytes.into());
+        let scalar_bytes = &mut scalar_bytes[0..32];
+
+        // The lowest three bits of the first octet are cleared
+        scalar_bytes[0] &= 0b1111_1000;
+        // the highest bit of the last octet is cleared
+        scalar_bytes[31] &= 0b0111_1111;
+        // and the second highest bit of the last octet is set
+        scalar_bytes[31] |= 0b0100_0000;
+
+        let mut scalar = generic_ec::Scalar::<E>::from_le_bytes_mod_order(scalar_bytes);
+        let scalar = generic_ec::SecretScalar::new(&mut scalar);
+        Self {
+            scalar
+        }
+    }
 }
 
 #[cfg(test)]
@@ -98,5 +121,21 @@ mod test {
         let key_bytes = pubkey.to_bytes();
         let pubkey_ = super::PublicKey::from_bytes(&key_bytes).unwrap();
         assert_eq!(pubkey, pubkey_);
+    }
+
+    #[test]
+    fn openssl_key() {
+        // This key is obtained from openssl by
+        // `openssl genpkey -algorithm ed25519 -out ed25519key.pem`
+        // And converted from pem to hex by
+        // `cat ed25519key.pub | sed '2q;d' | base64 -d | xxd -ps | tr -d '\n'`
+        let key_bytes =    hex::decode("eaec3fecf6d988cd8a51bbfba5d5a310d1887459f8433fa0a17fc09f34ee77a4").unwrap();
+        // Public key is obtained by `openssl pkey -in ed25519key.pem -pubout`
+        // and then converted to hex in the same way
+        let pubkey_bytes = hex::decode("d24f3652e2100524d31ae794e781c4cd0b4f53e2bb02665b85f9c71d5e80ab69").unwrap();
+
+        let pubkey = super::PublicKey::from_bytes(pubkey_bytes).unwrap();
+        let key = super::PrivateKey::from_pkey_bytes(&key_bytes[0..32]);
+        assert_eq!(key.public_key(), pubkey);
     }
 }
