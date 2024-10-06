@@ -135,7 +135,7 @@ mod test {
         let pubkey_bytes = hex::decode("d24f3652e2100524d31ae794e781c4cd0b4f53e2bb02665b85f9c71d5e80ab69").unwrap();
 
         let pubkey = super::PublicKey::from_bytes(pubkey_bytes).unwrap();
-        let key = super::PrivateKey::from_pkey_bytes(&key_bytes[0..32]);
+        let key = super::PrivateKey::from_eddsa_pkey_bytes(&key_bytes[0..32]);
         assert_eq!(key.public_key(), pubkey);
     }
 }

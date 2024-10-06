@@ -7,13 +7,13 @@ use cipher::generic_array::GenericArray;
 use generic_ec::Curve;
 use rand_core::{CryptoRng, RngCore};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PrivateKey<E: Curve> {
     /// `d` in the standard
     pub scalar: generic_ec::SecretScalar<E>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PublicKey<E: Curve> {
     /// `Q` in the standard
     pub point: generic_ec::Point<E>,
