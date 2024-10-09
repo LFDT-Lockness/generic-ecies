@@ -42,14 +42,16 @@ impl PrivateKey {
 
         let mut scalar = generic_ec::Scalar::<E>::from_le_bytes_mod_order(scalar_bytes);
         let scalar = generic_ec::SecretScalar::new(&mut scalar);
-        Self {
-            scalar
-        }
+        let scalar = generic_ec::NonZero::<generic_ec::SecretScalar<E>>::try_from(scalar)
+            .expect("Hashed bytes give zero with vanishing probability");
+        Self { scalar }
     }
 }
 
 #[cfg(test)]
 mod test {
+    use std::ops::Deref as _;
+
     #[test]
     fn encrypt_decrypt() {
         let mut rng = rand_dev::DevRng::new();
@@ -88,8 +90,8 @@ mod test {
     fn message_encode() {
         let mut rng = rand_dev::DevRng::new();
 
-        let ephemeral_key =
-            generic_ec::Point::<super::E>::generator() * generic_ec::Scalar::random(&mut rng);
+        let ephemeral_key = generic_ec::Point::generator()
+            * generic_ec::NonZero::<generic_ec::Scalar<super::E>>::random(&mut rng);
         let mut message = [0u8; 322];
         rand_core::RngCore::fill_bytes(&mut rng, &mut message);
         let mut tag = cipher::generic_array::GenericArray::<
@@ -115,7 +117,7 @@ mod test {
         let key = super::PrivateKey::generate(&mut rng);
         let key_bytes = key.to_bytes();
         let key_ = super::PrivateKey::from_bytes(&key_bytes).unwrap();
-        assert_eq!(key.scalar.as_ref(), key_.scalar.as_ref());
+        assert_eq!(key.scalar.deref().as_ref(), key_.scalar.deref().as_ref());
 
         let pubkey = key.public_key();
         let key_bytes = pubkey.to_bytes();
@@ -128,11 +130,16 @@ mod test {
         // This key is obtained from openssl by
         // `openssl genpkey -algorithm ed25519 -out ed25519key.pem`
         // And converted from pem to hex by
-        // `cat ed25519key.pub | sed '2q;d' | base64 -d | xxd -ps | tr -d '\n'`
-        let key_bytes =    hex::decode("eaec3fecf6d988cd8a51bbfba5d5a310d1887459f8433fa0a17fc09f34ee77a4").unwrap();
+        // `openssl pkey -in backup_key.pem -text -noout | grep -E '^priv:$' -A3 | tail -n +2 | tr -d ' :\n'`
+        let key_bytes =
+            hex::decode("eaec3fecf6d988cd8a51bbfba5d5a310d1887459f8433fa0a17fc09f34ee77a4")
+                .unwrap();
         // Public key is obtained by `openssl pkey -in ed25519key.pem -pubout`
-        // and then converted to hex in the same way
-        let pubkey_bytes = hex::decode("d24f3652e2100524d31ae794e781c4cd0b4f53e2bb02665b85f9c71d5e80ab69").unwrap();
+        // And then converted to hex in a similar way
+        // `openssl pkey -pubin -in ed25519.pub -text -noout | grep -E '^pub:$' -A3 | tail -n +2 | tr -d ' :\n'`
+        let pubkey_bytes =
+            hex::decode("d24f3652e2100524d31ae794e781c4cd0b4f53e2bb02665b85f9c71d5e80ab69")
+                .unwrap();
 
         let pubkey = super::PublicKey::from_bytes(pubkey_bytes).unwrap();
         let key = super::PrivateKey::from_eddsa_pkey_bytes(&key_bytes[0..32]);

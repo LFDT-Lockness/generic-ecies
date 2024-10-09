@@ -10,35 +10,35 @@ use rand_core::{CryptoRng, RngCore};
 #[derive(Clone, Debug)]
 pub struct PrivateKey<E: Curve> {
     /// `d` in the standard
-    pub scalar: generic_ec::SecretScalar<E>,
+    pub scalar: generic_ec::NonZero<generic_ec::SecretScalar<E>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PublicKey<E: Curve> {
     /// `Q` in the standard
-    pub point: generic_ec::Point<E>,
+    pub point: generic_ec::NonZero<generic_ec::Point<E>>,
 }
 
 #[derive(Debug)]
 pub struct EncryptedMessage<'m, Mac: digest::OutputSizeUser, E: Curve> {
-    pub ephemeral_key: generic_ec::Point<E>,
+    pub ephemeral_key: generic_ec::NonZero<generic_ec::Point<E>>,
     pub message: &'m mut [u8],
     pub tag: GenericArray<u8, Mac::OutputSize>,
 }
 
 impl<E: Curve> PrivateKey<E> {
     pub fn generate(rng: &mut (impl RngCore + CryptoRng)) -> Self {
-        let mut scalar = generic_ec::Scalar::random(rng);
-        let scalar = generic_ec::SecretScalar::new(&mut scalar);
+        let scalar = generic_ec::NonZero::<generic_ec::SecretScalar<E>>::random(rng);
         Self { scalar }
     }
     pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Option<Self> {
-        let mut scalar = generic_ec::Scalar::<E>::from_be_bytes(bytes).ok()?;
-        let scalar = generic_ec::SecretScalar::new(&mut scalar);
+        let scalar = generic_ec::SecretScalar::from_be_bytes(bytes.as_ref()).ok()?;
+        let scalar = generic_ec::NonZero::try_from(scalar).ok()?;
         Some(Self { scalar })
     }
     pub fn to_bytes(&self) -> Vec<u8> {
-        self.scalar.as_ref().to_be_bytes().to_vec()
+        let scalar: &generic_ec::Scalar<E> = self.scalar.as_ref();
+        scalar.to_be_bytes().to_vec()
     }
 
     pub fn public_key(&self) -> PublicKey<E> {
@@ -50,6 +50,7 @@ impl<E: Curve> PrivateKey<E> {
 impl<E: Curve> PublicKey<E> {
     pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Option<Self> {
         let point = generic_ec::Point::<E>::from_bytes(bytes).ok()?;
+        let point = generic_ec::NonZero::<generic_ec::Point<E>>::try_from(point).ok()?;
         Some(Self { point })
     }
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -94,8 +95,7 @@ where
     Enc: cipher::KeyIvInit + cipher::StreamCipher,
 {
     // 1. Select ephemeral key pair
-    let mut k = generic_ec::Scalar::random(rng);
-    let k = generic_ec::SecretScalar::new(&mut k);
+    let k = generic_ec::NonZero::<generic_ec::SecretScalar<E>>::random(rng);
     let r = generic_ec::Point::generator() * &k;
 
     // 2: Use compression unconditionally
@@ -150,14 +150,9 @@ where
     let m = message.message;
     let tag = message.tag;
 
-    // 3. Verify the validity of the ephemeral key
-
-    // Followint the steps in 3.2.2.1 of SECG SEC-1. Steps 2-4 are achieved by
-    // point construction
-    // 1: check for zero
-    if r.is_zero() {
-        return Err(DecError::DhInvalid("zero"));
-    }
+    // 3. Verify the validity of the ephemeral key - unnecessary as all
+    // verification steps outlined in 3.2.2.1 of SECG SEC-1 (including non-zero
+    // point) are encoded in types and thus are achieved by construction
 
     // 4. Use plain DH (no cofactors)
     let z = d * r;
@@ -225,6 +220,7 @@ impl<'m, Mac: digest::OutputSizeUser, E: Curve> EncryptedMessage<'m, Mac, E> {
                     }
                 }
             };
+        let ephemeral_key = generic_ec::NonZero::<generic_ec::Point<E>>::try_from(ephemeral_key)?;
 
         let tag_len = GenericArray::<u8, Mac::OutputSize>::default().len();
         let tag = &bytes[(l - tag_len)..];
@@ -262,8 +258,6 @@ pub enum EncError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DecError {
-    #[error("Ephemeral DH key is invalid: {0}")]
-    DhInvalid(&'static str),
     #[error("MAC verification failed: {0}")]
     MacInvalid(digest::MacError),
     #[error("DH produced zero")]
@@ -283,4 +277,6 @@ pub enum DeserializeError {
         generic_ec::errors::InvalidPoint,
         generic_ec::errors::InvalidPoint,
     ),
+    #[error("Ephemeral DH key is zero")]
+    ZeroPoint(#[from] generic_ec::errors::ZeroPoint),
 }

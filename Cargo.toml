@@ -4,8 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-#generic-ec = { version = "0.4" }
-generic-ec = { git = "https://github.com/LFDT-Lockness/generic-ec", rev = "f7bdc3afff5dbb22af77ecfe5e2d29e2a6272003" }
+generic-ec = { version = "0.4.3" }
 digest = { version = "0.10" }
 sha2 = { version = "0.10" }
 hkdf = { version = "0.12" }
