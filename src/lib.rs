@@ -85,7 +85,7 @@ impl<E: Curve> PrivateKey<E> {
 
 fn stream_encrypt_in_place<'m, E, R, Mac, Enc>(
     m: &'m mut [u8],
-    q: &generic_ec::Point<E>,
+    q: &generic_ec::NonZero<generic_ec::Point<E>>,
     rng: &mut R,
 ) -> Result<EncryptedMessage<'m, Mac, E>, EncError>
 where
@@ -99,11 +99,9 @@ where
     let r = generic_ec::Point::generator() * &k;
 
     // 2: Use compression unconditionally
-    // 3: Use plain DH (no cofactors)
-    let z = k * q;
-    if z.is_zero() {
-        return Err(EncError::ZeroDH);
-    }
+    // 3: Usage of DH with or without cofactor key is determined by `E` choice
+    let z: generic_ec::NonZero<_> = k * q;
+    // No need to check the point for zero, it's guaranteed by construction
 
     // 4: convert z to octet string
     let z_bs = z.to_bytes(true);

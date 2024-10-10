@@ -27,7 +27,10 @@ impl PrivateKey {
     /// Since eddsa secret key is not a scalar, and most tools that call
     /// themselves ed25519 are actually eddsa, we need to convert from eddsa key
     /// to a scalar.
-    pub fn from_eddsa_pkey_bytes(bytes: &[u8]) -> Self {
+    ///
+    /// Returns `None` if the bytes hash to zero (this has a vanishing
+    /// probability of occuring)
+    pub fn from_eddsa_pkey_bytes(bytes: &[u8; 32]) -> Option<Self> {
         use sha2::Digest as _;
         let scalar_bytes = sha2::Sha512::new().chain_update(bytes).finalize();
         let mut scalar_bytes = zeroize::Zeroizing::<[u8; 64]>::new(scalar_bytes.into());
@@ -42,9 +45,8 @@ impl PrivateKey {
 
         let mut scalar = generic_ec::Scalar::<E>::from_le_bytes_mod_order(scalar_bytes);
         let scalar = generic_ec::SecretScalar::new(&mut scalar);
-        let scalar = generic_ec::NonZero::<generic_ec::SecretScalar<E>>::try_from(scalar)
-            .expect("Hashed bytes give zero with vanishing probability");
-        Self { scalar }
+        let scalar = generic_ec::NonZero::<generic_ec::SecretScalar<E>>::try_from(scalar).ok()?;
+        Some(Self { scalar })
     }
 }
 
@@ -76,9 +78,9 @@ mod test {
         let decrypted_message = {
             decrypted_bytes = encrypted_message.message.to_vec();
             let message = super::EncryptedMessage {
-                ephemeral_key: encrypted_message.ephemeral_key.clone(),
+                ephemeral_key: encrypted_message.ephemeral_key,
                 message: &mut decrypted_bytes,
-                tag: encrypted_message.tag.clone(),
+                tag: encrypted_message.tag,
             };
             key.decrypt_in_place(message).unwrap()
         };
@@ -142,7 +144,8 @@ mod test {
                 .unwrap();
 
         let pubkey = super::PublicKey::from_bytes(pubkey_bytes).unwrap();
-        let key = super::PrivateKey::from_eddsa_pkey_bytes(&key_bytes[0..32]);
+        let key =
+            super::PrivateKey::from_eddsa_pkey_bytes(key_bytes[0..32].try_into().unwrap()).unwrap();
         assert_eq!(key.public_key(), pubkey);
     }
 }
