@@ -109,14 +109,18 @@ where
     // 5-6. Use KDF to produce keys for encryption and mac
     let kdf = hkdf::Hkdf::<sha2::Sha256>::new(None, &z_bs);
     let mut cipher_key = cipher::Key::<Enc>::default();
-    kdf.expand(b"generic-ecies stream encryption key", &mut cipher_key)
-        .map_err(EncError::KdfCipher)?;
+    let mut mac_key = cipher::Key::<Mac>::default();
+    let all_bytes = vec![0u8; cipher_key.len() + mac_key.len()];
+
+    kdf.expand(b"generic-ecies cipher and mac", &mut cipher_key)
+        .map_err(EncError::Kdf)?;
+    let mid = cipher_key.len();
+    cipher_key.copy_from_slice(&all_bytes[..mid]);
+    mac_key.copy_from_slice(&all_bytes[mid..]);
+
     // Use zero IV since the key never repeats
     let cipher_iv = cipher::Iv::<Enc>::default();
     let mut cipher: Enc = cipher::KeyIvInit::new(&cipher_key, &cipher_iv);
-    let mut mac_key = cipher::Key::<Mac>::default();
-    kdf.expand(b"generic-ecies mac key", &mut mac_key)
-        .map_err(EncError::KdfMac)?;
     let mac: Mac = digest::Mac::new(&mac_key);
 
     // 7. Encrypt message
@@ -135,7 +139,7 @@ where
 
 fn stream_decrypt_in_place<'m, E, Mac, Enc>(
     message: EncryptedMessage<'m, Mac, E>,
-    d: &generic_ec::SecretScalar<E>,
+    d: &generic_ec::NonZero<generic_ec::SecretScalar<E>>,
 ) -> Result<&'m mut [u8], DecError>
 where
     E: Curve,
@@ -152,11 +156,9 @@ where
     // verification steps outlined in 3.2.2.1 of SECG SEC-1 (including non-zero
     // point) are encoded in types and thus are achieved by construction
 
-    // 4. Use plain DH (no cofactors)
-    let z = d * r;
-    if z.is_zero() {
-        return Err(DecError::ZeroDH);
-    }
+    // 4: Usage of DH with or without cofactor key is determined by `E` choice
+    let z: generic_ec::NonZero<_> = d * r;
+    // No need to check the point for zero, it's guaranteed by construction
 
     // 5: convert z to octet string
     let z_bs = z.to_bytes(true);
@@ -164,14 +166,18 @@ where
     // 6-7. Use KDF to produce keys for encryption and mac
     let kdf = hkdf::Hkdf::<sha2::Sha256>::new(None, &z_bs);
     let mut cipher_key = cipher::Key::<Enc>::default();
-    kdf.expand(b"generic-ecies stream encryption key", &mut cipher_key)
-        .map_err(DecError::KdfCipher)?;
+    let mut mac_key = cipher::Key::<Mac>::default();
+    let all_bytes = vec![0u8; cipher_key.len() + mac_key.len()];
+
+    kdf.expand(b"generic-ecies cipher and mac", &mut cipher_key)
+        .map_err(DecError::Kdf)?;
+    let mid = cipher_key.len();
+    cipher_key.copy_from_slice(&all_bytes[..mid]);
+    mac_key.copy_from_slice(&all_bytes[mid..]);
+
     // Use zero IV since the key never repeats
     let cipher_iv = cipher::Iv::<Enc>::default();
     let mut cipher: Enc = cipher::KeyIvInit::new(&cipher_key, &cipher_iv);
-    let mut mac_key = cipher::Key::<Mac>::default();
-    kdf.expand(b"generic-ecies mac key", &mut mac_key)
-        .map_err(DecError::KdfMac)?;
     let mac: Mac = digest::Mac::new(&mac_key);
 
     // 8. Verify MAC
@@ -246,10 +252,8 @@ impl<'m, Mac: digest::OutputSizeUser, E: Curve> PartialEq for EncryptedMessage<'
 pub enum EncError {
     #[error("DH produced zero")]
     ZeroDH,
-    #[error("KDF for MAC key failed: {0}")]
-    KdfMac(hkdf::InvalidLength),
-    #[error("KDF for MAC key failed: {0}")]
-    KdfCipher(hkdf::InvalidLength),
+    #[error("KDF failed: {0}")]
+    Kdf(hkdf::InvalidLength),
     #[error("Key stream end (too much data supplied): {0}")]
     StreamEnd(cipher::StreamCipherError),
 }
@@ -260,10 +264,8 @@ pub enum DecError {
     MacInvalid(digest::MacError),
     #[error("DH produced zero")]
     ZeroDH,
-    #[error("KDF for MAC key failed: {0}")]
-    KdfMac(hkdf::InvalidLength),
-    #[error("KDF for MAC key failed: {0}")]
-    KdfCipher(hkdf::InvalidLength),
+    #[error("KDF failed: {0}")]
+    Kdf(hkdf::InvalidLength),
     #[error("Key stream end (too much data supplied): {0}")]
     StreamEnd(cipher::StreamCipherError),
 }
