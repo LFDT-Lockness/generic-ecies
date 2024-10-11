@@ -99,7 +99,8 @@ where
     let r = generic_ec::Point::generator() * &k;
 
     // 2: Use compression unconditionally
-    // 3: Usage of DH with or without cofactor key is determined by `E` choice
+    // 3: Use ECDH without small cofactor, as in generic-ec all scalars are
+    // guaranteed to be in the prime order subgroup
     let z: generic_ec::NonZero<_> = k * q;
     // No need to check the point for zero, it's guaranteed by construction
 
@@ -156,7 +157,8 @@ where
     // verification steps outlined in 3.2.2.1 of SECG SEC-1 (including non-zero
     // point) are encoded in types and thus are achieved by construction
 
-    // 4: Usage of DH with or without cofactor key is determined by `E` choice
+    // 4: Use ECDH without small cofactor, as in generic-ec all scalars are
+    // guaranteed to be in the prime order subgroup
     let z: generic_ec::NonZero<_> = d * r;
     // No need to check the point for zero, it's guaranteed by construction
 
