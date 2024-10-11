@@ -111,9 +111,9 @@ where
     let kdf = hkdf::Hkdf::<sha2::Sha256>::new(None, &z_bs);
     let mut cipher_key = cipher::Key::<Enc>::default();
     let mut mac_key = cipher::Key::<Mac>::default();
-    let all_bytes = vec![0u8; cipher_key.len() + mac_key.len()];
+    let mut all_bytes = vec![0u8; cipher_key.len() + mac_key.len()];
 
-    kdf.expand(b"generic-ecies cipher and mac", &mut cipher_key)
+    kdf.expand(b"generic-ecies cipher and mac", &mut all_bytes)
         .map_err(EncError::Kdf)?;
     let mid = cipher_key.len();
     cipher_key.copy_from_slice(&all_bytes[..mid]);
@@ -169,9 +169,9 @@ where
     let kdf = hkdf::Hkdf::<sha2::Sha256>::new(None, &z_bs);
     let mut cipher_key = cipher::Key::<Enc>::default();
     let mut mac_key = cipher::Key::<Mac>::default();
-    let all_bytes = vec![0u8; cipher_key.len() + mac_key.len()];
+    let mut all_bytes = vec![0u8; cipher_key.len() + mac_key.len()];
 
-    kdf.expand(b"generic-ecies cipher and mac", &mut cipher_key)
+    kdf.expand(b"generic-ecies cipher and mac", &mut all_bytes)
         .map_err(DecError::Kdf)?;
     let mid = cipher_key.len();
     cipher_key.copy_from_slice(&all_bytes[..mid]);
