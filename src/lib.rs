@@ -68,6 +68,28 @@ impl<E: Curve> PublicKey<E> {
     {
         stream_encrypt_in_place::<_, _, _, Enc>(message, &self.point, rng)
     }
+
+    pub fn stream_encrypt<Mac, Enc>(
+        &self,
+        message: &[u8],
+        rng: &mut (impl RngCore + CryptoRng),
+    ) -> Result<Vec<u8>, EncError>
+    where
+        Mac: digest::Mac + cipher::KeyInit,
+        Enc: cipher::KeyIvInit + cipher::StreamCipher,
+    {
+        let key_len = generic_ec::Point::<E>::serialized_len(true);
+        let mac_len = <Mac::OutputSize as cipher::typenum::Unsigned>::USIZE;
+        let mut bytes = vec![0; key_len + message.len() + mac_len];
+        let message_slice = &mut bytes[key_len..(key_len + message.len())];
+        message_slice.copy_from_slice(message);
+        let EncryptedMessage {
+            ephemeral_key, tag, ..
+        } = self.stream_encrypt_in_place::<Mac, Enc>(message_slice, rng)?;
+        bytes[..key_len].copy_from_slice(&ephemeral_key.to_bytes(true));
+        bytes[(key_len + message.len())..].copy_from_slice(&tag);
+        Ok(bytes)
+    }
 }
 
 impl<E: Curve> PrivateKey<E> {
@@ -80,6 +102,25 @@ impl<E: Curve> PrivateKey<E> {
         Enc: cipher::KeyIvInit + cipher::StreamCipher,
     {
         stream_decrypt_in_place::<_, _, Enc>(message, &self.scalar)
+    }
+
+    pub fn stream_decrypt<Mac, Enc>(
+        &self,
+        message: &EncryptedMessage<'_, Mac, E>,
+    ) -> Result<Vec<u8>, DecError>
+    where
+        Mac: digest::Mac + cipher::KeyInit,
+        Enc: cipher::KeyIvInit + cipher::StreamCipher,
+    {
+        let mut msg_bytes = Vec::with_capacity(message.message.len());
+        msg_bytes.extend_from_slice(message.message);
+        let msg = EncryptedMessage {
+            ephemeral_key: message.ephemeral_key,
+            tag: message.tag.clone(),
+            message: &mut msg_bytes,
+        };
+        let _ = self.stream_decrypt_in_place::<Mac, Enc>(msg)?;
+        Ok(msg_bytes)
     }
 }
 
