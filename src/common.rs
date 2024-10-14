@@ -3,6 +3,7 @@ macro_rules! make_tests {
         #[cfg(test)]
         mod common_test {
             use std::ops::Deref as _;
+            type E = <super::S as crate::Suite>::E;
 
             #[test]
             fn encrypt_decrypt() {
@@ -43,13 +44,11 @@ macro_rules! make_tests {
                 let mut rng = rand_dev::DevRng::new();
 
                 let ephemeral_key = generic_ec::Point::generator()
-                    * generic_ec::NonZero::<generic_ec::Scalar<super::E>>::random(&mut rng);
+                    * generic_ec::NonZero::<generic_ec::Scalar<E>>::random(&mut rng);
                 let mut message = [0u8; 322];
                 rand_core::RngCore::fill_bytes(&mut rng, &mut message);
-                let mut tag = cipher::generic_array::GenericArray::<
-                    u8,
-                    <super::Mac as digest::OutputSizeUser>::OutputSize,
-                >::default();
+                let mut tag =
+                    cipher::generic_array::GenericArray::<u8, crate::MacSize<super::S>>::default();
                 rand_core::RngCore::fill_bytes(&mut rng, &mut tag);
 
                 let message = super::EncryptedMessage {
@@ -101,6 +100,6 @@ macro_rules! make_tests {
                 assert_eq!(pubkey, pubkey_);
             }
         }
-    }
+    };
 }
 pub(crate) use make_tests;

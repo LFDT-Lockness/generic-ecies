@@ -1,10 +1,15 @@
-pub type E = generic_ec::curves::Ed25519;
-pub type Mac = hmac::Hmac<sha2::Sha256>;
-pub type Enc = salsa20::XSalsa20;
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct S;
 
-pub type PrivateKey = crate::PrivateKey<E>;
-pub type PublicKey = crate::PublicKey<E>;
-pub type EncryptedMessage<'m> = crate::EncryptedMessage<'m, Mac, E>;
+impl super::Suite for S {
+    type E = generic_ec::curves::Ed25519;
+    type Mac = hmac::Hmac<sha2::Sha256>;
+    type Enc = salsa20::XSalsa20;
+}
+
+pub type PrivateKey = crate::PrivateKey<S>;
+pub type PublicKey = crate::PublicKey<S>;
+pub type EncryptedMessage<'m> = crate::EncryptedMessage<'m, S>;
 
 impl PublicKey {
     pub fn encrypt_in_place<'m>(
@@ -12,7 +17,7 @@ impl PublicKey {
         message: &'m mut [u8],
         rng: &mut (impl rand_core::RngCore + rand_core::CryptoRng),
     ) -> Result<EncryptedMessage<'m>, crate::EncError> {
-        self.stream_encrypt_in_place::<Mac, Enc>(message, rng)
+        self.stream_encrypt_in_place(message, rng)
     }
 
     pub fn encrypt(
@@ -20,7 +25,7 @@ impl PublicKey {
         message: &[u8],
         rng: &mut (impl rand_core::RngCore + rand_core::CryptoRng),
     ) -> Result<Vec<u8>, crate::EncError> {
-        self.stream_encrypt::<Mac, Enc>(message, rng)
+        self.stream_encrypt(message, rng)
     }
 }
 
@@ -29,11 +34,11 @@ impl PrivateKey {
         &self,
         message: EncryptedMessage<'m>,
     ) -> Result<&'m mut [u8], crate::DecError> {
-        self.stream_decrypt_in_place::<Mac, Enc>(message)
+        self.stream_decrypt_in_place(message)
     }
 
     pub fn decrypt(&self, message: &EncryptedMessage<'_>) -> Result<Vec<u8>, crate::DecError> {
-        self.stream_decrypt::<Mac, Enc>(message)
+        self.stream_decrypt(message)
     }
 
     /// Since eddsa secret key is not a scalar, and most tools that call
@@ -55,9 +60,15 @@ impl PrivateKey {
         // and the second highest bit of the last octet is set
         scalar_bytes[31] |= 0b0100_0000;
 
-        let mut scalar = generic_ec::Scalar::<E>::from_le_bytes_mod_order(scalar_bytes);
+        let mut scalar = generic_ec::Scalar::<generic_ec::curves::Ed25519>::from_le_bytes_mod_order(
+            scalar_bytes,
+        );
         let scalar = generic_ec::SecretScalar::new(&mut scalar);
-        let scalar = generic_ec::NonZero::<generic_ec::SecretScalar<E>>::try_from(scalar).ok()?;
+        let scalar =
+            generic_ec::NonZero::<generic_ec::SecretScalar<generic_ec::curves::Ed25519>>::try_from(
+                scalar,
+            )
+            .ok()?;
         Some(Self { scalar })
     }
 }
