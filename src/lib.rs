@@ -1,7 +1,12 @@
 //! Based on [SECG SEC-1](http://www.secg.org/sec1-v2.pdf)
 
+#[macro_use]
+mod common;
+
 #[cfg(feature = "curve25519xsalsa20hmac")]
 pub mod curve25519xsalsa20hmac;
+#[cfg(feature = "curve25519aes128-cbchmac")]
+pub mod curve25519aes128_cbchmac;
 
 use cipher::generic_array::GenericArray;
 use generic_ec::Curve;
@@ -67,6 +72,18 @@ impl<E: Curve> PublicKey<E> {
         Enc: cipher::KeyIvInit + cipher::StreamCipher,
     {
         stream_encrypt_in_place::<_, _, _, Enc>(message, &self.point, rng)
+    }
+
+    pub fn block_encrypt_in_place<'m, Mac, Enc>(
+        &self,
+        message: &'m mut [u8],
+        rng: &mut (impl RngCore + CryptoRng),
+    ) -> Result<EncryptedMessage<'m, Mac, E>, EncError>
+    where
+        Mac: digest::Mac + cipher::KeyInit,
+        Enc: cipher::KeyIvInit + cipher::BlockEncryptMut,
+    {
+        block_encrypt_in_place::<_, _, _, Enc>(message, &self.point, rng)
     }
 
     pub fn stream_encrypt<Mac, Enc>(
@@ -167,6 +184,61 @@ where
 
     // 7. Encrypt message
     cipher.try_apply_keystream(m).map_err(EncError::StreamEnd)?;
+
+    // 8. MAC-tag the message
+    let d = mac.chain_update(&*m).finalize().into_bytes();
+
+    // 9. Output as structured message. Byte conversion is done separately
+    Ok(EncryptedMessage {
+        ephemeral_key: r,
+        message: m,
+        tag: d,
+    })
+}
+
+fn block_encrypt_in_place<'m, E, R, Mac, Enc>(
+    m: &'m mut [u8],
+    q: &generic_ec::NonZero<generic_ec::Point<E>>,
+    rng: &mut R,
+) -> Result<EncryptedMessage<'m, Mac, E>, EncError>
+where
+    E: Curve,
+    R: RngCore + CryptoRng,
+    Mac: digest::Mac + cipher::KeyInit,
+    Enc: cipher::KeyIvInit + cipher::BlockEncryptMut,
+{
+    // 1. Select ephemeral key pair
+    let k = generic_ec::NonZero::<generic_ec::SecretScalar<E>>::random(rng);
+    let r = generic_ec::Point::generator() * &k;
+
+    // 2: Use compression unconditionally
+    // 3: Use ECDH without small cofactor, as in generic-ec all scalars are
+    // guaranteed to be in the prime order subgroup
+    let z: generic_ec::NonZero<_> = k * q;
+    // No need to check the point for zero, it's guaranteed by construction
+
+    // 4: convert z to octet string
+    let z_bs = z.to_bytes(true);
+
+    // 5-6. Use KDF to produce keys for encryption and mac
+    let kdf = hkdf::Hkdf::<sha2::Sha256>::new(None, &z_bs);
+    let mut cipher_key = cipher::Key::<Enc>::default();
+    let mut mac_key = cipher::Key::<Mac>::default();
+    let mut all_bytes = vec![0u8; cipher_key.len() + mac_key.len()];
+
+    kdf.expand(b"generic-ecies cipher and mac", &mut all_bytes)
+        .map_err(EncError::Kdf)?;
+    let mid = cipher_key.len();
+    cipher_key.copy_from_slice(&all_bytes[..mid]);
+    mac_key.copy_from_slice(&all_bytes[mid..]);
+
+    // Use zero IV since the key never repeats
+    let cipher_iv = cipher::Iv::<Enc>::default();
+    let cipher: Enc = cipher::KeyIvInit::new(&cipher_key, &cipher_iv);
+    let mac: Mac = digest::Mac::new(&mac_key);
+
+    // 7. Encrypt message
+    cipher.encrypt_padded_mut::<cipher::block_padding::Pkcs7>(m, m.len()).map_err(EncError::PadError)?;
 
     // 8. MAC-tag the message
     let d = mac.chain_update(&*m).finalize().into_bytes();
@@ -299,6 +371,8 @@ pub enum EncError {
     Kdf(hkdf::InvalidLength),
     #[error("Key stream end (too much data supplied): {0}")]
     StreamEnd(cipher::StreamCipherError),
+    #[error("Pad error {0}")]
+    PadError(cipher::inout::PadError),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -311,6 +385,8 @@ pub enum DecError {
     Kdf(hkdf::InvalidLength),
     #[error("Key stream end (too much data supplied): {0}")]
     StreamEnd(cipher::StreamCipherError),
+    #[error("Pad error {0}")]
+    PadError(cipher::inout::PadError),
 }
 
 #[derive(Debug, thiserror::Error)]
