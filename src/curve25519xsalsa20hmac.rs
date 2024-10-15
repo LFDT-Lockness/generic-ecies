@@ -5,6 +5,7 @@ impl super::Suite for S {
     type E = generic_ec::curves::Ed25519;
     type Mac = hmac::Hmac<sha2::Sha256>;
     type Enc = salsa20::XSalsa20;
+    type Dec = salsa20::XSalsa20;
 }
 
 pub type PrivateKey = crate::PrivateKey<S>;
@@ -73,7 +74,7 @@ impl PrivateKey {
     }
 }
 
-crate::common::make_tests!();
+crate::common::make_tests!("stream");
 #[cfg(test)]
 mod test {
     #[test]

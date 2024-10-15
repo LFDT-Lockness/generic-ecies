@@ -24,7 +24,7 @@ hex = "0.4.3"
 rand_dev = "0.1"
 
 [features]
-default = ["curve25519xsalsa20hmac"]
+default = ["curve25519xsalsa20hmac", "curve25519aes128-cbchmac"]
 
 curve25519xsalsa20hmac = ["dep:salsa20", "generic-ec/curve-ed25519", "dep:hmac", "dep:zeroize"]
 curve25519aes128-cbchmac = ["dep:aes", "dep:cbc", "generic-ec/curve-ed25519", "dep:hmac"]

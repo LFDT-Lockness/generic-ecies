@@ -17,9 +17,21 @@ pub trait Suite {
     type E: Curve;
     type Mac: digest::OutputSizeUser;
     type Enc;
+    type Dec;
 }
 
 pub(crate) type MacSize<S> = <<S as Suite>::Mac as digest::OutputSizeUser>::OutputSize;
+
+/// Amount of bytes padding of this message will take. When using
+/// [`PublicKey::block_encrypt_in_place`], you will find this function useful to
+/// find out how many bytes to append to the buffer so that the padding will fit
+pub const fn pad_size<S: Suite>(message_len: usize) -> usize
+where
+    S::Enc: cipher::BlockSizeUser,
+{
+    let block_size = <<S::Enc as cipher::BlockSizeUser>::BlockSize as cipher::Unsigned>::USIZE;
+    block_size - (message_len % block_size)
+}
 
 #[derive(Clone, Debug)]
 pub struct PrivateKey<S: Suite> {
@@ -86,13 +98,14 @@ impl<S: Suite> PublicKey<S> {
     pub fn block_encrypt_in_place<'m>(
         &self,
         message: &'m mut [u8],
+        data_len: usize,
         rng: &mut (impl RngCore + CryptoRng),
     ) -> Result<EncryptedMessage<'m, S>, EncError>
     where
         S::Mac: digest::Mac + cipher::KeyInit,
         S::Enc: cipher::KeyIvInit + cipher::BlockEncryptMut,
     {
-        block_encrypt_in_place::<S, _>(message, &self.point, rng)
+        block_encrypt_in_place::<S, _>(message, data_len, &self.point, rng)
     }
 
     pub fn stream_encrypt(
@@ -104,16 +117,35 @@ impl<S: Suite> PublicKey<S> {
         S::Mac: digest::Mac + cipher::KeyInit,
         S::Enc: cipher::KeyIvInit + cipher::StreamCipher,
     {
+        with_copy(message, |msg| self.stream_encrypt_in_place(msg, rng))
+    }
+
+    pub fn block_encrypt(
+        &self,
+        message: &[u8],
+        rng: &mut (impl RngCore + CryptoRng),
+    ) -> Result<Vec<u8>, EncError>
+    where
+        S::Mac: digest::Mac + cipher::KeyInit,
+        S::Enc: cipher::KeyIvInit + cipher::BlockEncryptMut,
+    {
         let key_len = generic_ec::Point::<S::E>::serialized_len(true);
         let mac_len = <MacSize<S> as cipher::typenum::Unsigned>::USIZE;
-        let mut bytes = vec![0; key_len + message.len() + mac_len];
-        let message_slice = &mut bytes[key_len..(key_len + message.len())];
-        message_slice.copy_from_slice(message);
+        let msg_len = message.len();
+        let pad_len = pad_size::<S>(msg_len);
+        eprintln!("encrypting message {} with padding {}", msg_len, pad_len);
+
+        let mut bytes = vec![0; key_len + msg_len + pad_len + mac_len];
+        bytes[key_len..(key_len + msg_len)].copy_from_slice(message);
+        // contains space for padding
+        let message_slice = &mut bytes[key_len..(key_len + msg_len + pad_len)];
+
         let EncryptedMessage {
             ephemeral_key, tag, ..
-        } = self.stream_encrypt_in_place(message_slice, rng)?;
+        } = self.block_encrypt_in_place(message_slice, msg_len, rng)?;
+
         bytes[..key_len].copy_from_slice(&ephemeral_key.to_bytes(true));
-        bytes[(key_len + message.len())..].copy_from_slice(&tag);
+        bytes[(key_len + msg_len + pad_len)..].copy_from_slice(&tag);
         Ok(bytes)
     }
 }
@@ -125,7 +157,7 @@ impl<S: Suite> PrivateKey<S> {
     ) -> Result<&'m mut [u8], DecError>
     where
         S::Mac: digest::Mac + cipher::KeyInit,
-        S::Enc: cipher::KeyIvInit + cipher::StreamCipher,
+        S::Dec: cipher::KeyIvInit + cipher::StreamCipher,
     {
         stream_decrypt_in_place(message, &self.scalar)
     }
@@ -133,7 +165,7 @@ impl<S: Suite> PrivateKey<S> {
     pub fn stream_decrypt(&self, message: &EncryptedMessage<'_, S>) -> Result<Vec<u8>, DecError>
     where
         S::Mac: digest::Mac + cipher::KeyInit,
-        S::Enc: cipher::KeyIvInit + cipher::StreamCipher,
+        S::Dec: cipher::KeyIvInit + cipher::StreamCipher,
     {
         let mut msg_bytes = Vec::with_capacity(message.message.len());
         msg_bytes.extend_from_slice(message.message);
@@ -145,6 +177,61 @@ impl<S: Suite> PrivateKey<S> {
         let _ = self.stream_decrypt_in_place(msg)?;
         Ok(msg_bytes)
     }
+
+    pub fn block_decrypt_in_place<'m>(
+        &self,
+        message: EncryptedMessage<'m, S>,
+    ) -> Result<&'m mut [u8], DecError>
+    where
+        S::Mac: digest::Mac + cipher::KeyInit,
+        S::Dec: cipher::KeyIvInit + cipher::BlockDecryptMut,
+    {
+        block_decrypt_in_place(message, &self.scalar)
+    }
+
+    pub fn block_decrypt(&self, message: &EncryptedMessage<'_, S>) -> Result<Vec<u8>, DecError>
+    where
+        S::Mac: digest::Mac + cipher::KeyInit,
+        S::Dec: cipher::KeyIvInit + cipher::BlockDecryptMut,
+    {
+        let mut msg_bytes = Vec::with_capacity(message.message.len());
+        msg_bytes.extend_from_slice(message.message);
+        let msg = EncryptedMessage {
+            ephemeral_key: message.ephemeral_key,
+            tag: message.tag.clone(),
+            message: &mut msg_bytes,
+        };
+        let s = self.block_decrypt_in_place(msg)?;
+        let len_without_pad = s.len();
+        msg_bytes.truncate(len_without_pad);
+        Ok(msg_bytes)
+    }
+}
+
+fn ecies_kem<E: Curve>(
+    q: generic_ec::NonZero<generic_ec::Point<E>>,
+    k: &generic_ec::NonZero<generic_ec::SecretScalar<E>>,
+    cipher_key: &mut [u8],
+    mac_key: &mut [u8],
+) -> Result<(), hkdf::InvalidLength> {
+    // Step 3 in encryption, step 4 in decruption: Use ECDH without small
+    // cofactor, as in generic-ec all scalars are guaranteed to be in the prime
+    // order subgroup
+    let z: generic_ec::NonZero<_> = k * q;
+    // No need to check the point for zero, it's guaranteed by construction
+
+    // 4 in enc, 5 in dec: convert z to octet string
+    let z_bs = z.to_bytes(true);
+
+    // 5-6 in enc, 6-7 in dec: use KDF to produce keys for encryption and mac
+    let kdf = hkdf::Hkdf::<sha2::Sha256>::new(None, &z_bs);
+    let mut all_bytes = vec![0u8; cipher_key.len() + mac_key.len()];
+
+    kdf.expand(b"generic-ecies cipher and mac", &mut all_bytes)?;
+    let mid = cipher_key.len();
+    cipher_key.copy_from_slice(&all_bytes[..mid]);
+    mac_key.copy_from_slice(&all_bytes[mid..]);
+    Ok(())
 }
 
 fn stream_encrypt_in_place<'m, S, R>(
@@ -163,25 +250,11 @@ where
     let r = generic_ec::Point::generator() * &k;
 
     // 2: Use compression unconditionally
-    // 3: Use ECDH without small cofactor, as in generic-ec all scalars are
-    // guaranteed to be in the prime order subgroup
-    let z: generic_ec::NonZero<_> = k * q;
-    // No need to check the point for zero, it's guaranteed by construction
 
-    // 4: convert z to octet string
-    let z_bs = z.to_bytes(true);
-
-    // 5-6. Use KDF to produce keys for encryption and mac
-    let kdf = hkdf::Hkdf::<sha2::Sha256>::new(None, &z_bs);
+    // Steps 3-6 encapsulated in KEM
     let mut cipher_key = cipher::Key::<S::Enc>::default();
     let mut mac_key = cipher::Key::<S::Mac>::default();
-    let mut all_bytes = vec![0u8; cipher_key.len() + mac_key.len()];
-
-    kdf.expand(b"generic-ecies cipher and mac", &mut all_bytes)
-        .map_err(EncError::Kdf)?;
-    let mid = cipher_key.len();
-    cipher_key.copy_from_slice(&all_bytes[..mid]);
-    mac_key.copy_from_slice(&all_bytes[mid..]);
+    ecies_kem(*q, &k, &mut cipher_key, &mut mac_key).map_err(EncError::Kdf)?;
 
     // Use zero IV since the key never repeats
     let cipher_iv = cipher::Iv::<S::Enc>::default();
@@ -204,6 +277,7 @@ where
 
 fn block_encrypt_in_place<'m, S: Suite, R>(
     m: &'m mut [u8],
+    data_len: usize,
     q: &generic_ec::NonZero<generic_ec::Point<S::E>>,
     rng: &mut R,
 ) -> Result<EncryptedMessage<'m, S>, EncError>
@@ -217,25 +291,11 @@ where
     let r = generic_ec::Point::generator() * &k;
 
     // 2: Use compression unconditionally
-    // 3: Use ECDH without small cofactor, as in generic-ec all scalars are
-    // guaranteed to be in the prime order subgroup
-    let z: generic_ec::NonZero<_> = k * q;
-    // No need to check the point for zero, it's guaranteed by construction
 
-    // 4: convert z to octet string
-    let z_bs = z.to_bytes(true);
-
-    // 5-6. Use KDF to produce keys for encryption and mac
-    let kdf = hkdf::Hkdf::<sha2::Sha256>::new(None, &z_bs);
+    // Steps 3-6 encapsulated in KEM
     let mut cipher_key = cipher::Key::<S::Enc>::default();
     let mut mac_key = cipher::Key::<S::Mac>::default();
-    let mut all_bytes = vec![0u8; cipher_key.len() + mac_key.len()];
-
-    kdf.expand(b"generic-ecies cipher and mac", &mut all_bytes)
-        .map_err(EncError::Kdf)?;
-    let mid = cipher_key.len();
-    cipher_key.copy_from_slice(&all_bytes[..mid]);
-    mac_key.copy_from_slice(&all_bytes[mid..]);
+    ecies_kem(*q, &k, &mut cipher_key, &mut mac_key).map_err(EncError::Kdf)?;
 
     // Use zero IV since the key never repeats
     let cipher_iv = cipher::Iv::<S::Enc>::default();
@@ -243,8 +303,10 @@ where
     let mac: S::Mac = digest::Mac::new(&mac_key);
 
     // 7. Encrypt message
-    cipher::BlockEncryptMut::encrypt_padded_mut::<cipher::block_padding::Pkcs7>(cipher, m, m.len())
-        .map_err(EncError::PadError)?;
+    cipher::BlockEncryptMut::encrypt_padded_mut::<cipher::block_padding::Pkcs7>(
+        cipher, m, data_len,
+    )
+    .map_err(EncError::PadError)?;
 
     // 8. MAC-tag the message
     let d = mac.chain_update(&*m).finalize().into_bytes();
@@ -263,7 +325,7 @@ fn stream_decrypt_in_place<'m, S: Suite>(
 ) -> Result<&'m mut [u8], DecError>
 where
     S::Mac: digest::Mac + cipher::KeyInit,
-    S::Enc: cipher::KeyIvInit + cipher::StreamCipher,
+    S::Dec: cipher::KeyIvInit + cipher::StreamCipher,
 {
     // Byte conversion of step 1 and 2 is done separately
 
@@ -275,29 +337,14 @@ where
     // verification steps outlined in 3.2.2.1 of SECG SEC-1 (including non-zero
     // point) are encoded in types and thus are achieved by construction
 
-    // 4: Use ECDH without small cofactor, as in generic-ec all scalars are
-    // guaranteed to be in the prime order subgroup
-    let z: generic_ec::NonZero<_> = d * r;
-    // No need to check the point for zero, it's guaranteed by construction
-
-    // 5: convert z to octet string
-    let z_bs = z.to_bytes(true);
-
-    // 6-7. Use KDF to produce keys for encryption and mac
-    let kdf = hkdf::Hkdf::<sha2::Sha256>::new(None, &z_bs);
-    let mut cipher_key = cipher::Key::<S::Enc>::default();
+    // Steps 4-7 encapsulated in KEM
+    let mut cipher_key = cipher::Key::<S::Dec>::default();
     let mut mac_key = cipher::Key::<S::Mac>::default();
-    let mut all_bytes = vec![0u8; cipher_key.len() + mac_key.len()];
-
-    kdf.expand(b"generic-ecies cipher and mac", &mut all_bytes)
-        .map_err(DecError::Kdf)?;
-    let mid = cipher_key.len();
-    cipher_key.copy_from_slice(&all_bytes[..mid]);
-    mac_key.copy_from_slice(&all_bytes[mid..]);
+    ecies_kem(r, d, &mut cipher_key, &mut mac_key).map_err(DecError::Kdf)?;
 
     // Use zero IV since the key never repeats
-    let cipher_iv = cipher::Iv::<S::Enc>::default();
-    let mut cipher: S::Enc = cipher::KeyIvInit::new(&cipher_key, &cipher_iv);
+    let cipher_iv = cipher::Iv::<S::Dec>::default();
+    let mut cipher: S::Dec = cipher::KeyIvInit::new(&cipher_key, &cipher_iv);
     let mac: S::Mac = digest::Mac::new(&mac_key);
 
     // 8. Verify MAC
@@ -310,6 +357,49 @@ where
 
     // 10. Output message
     Ok(m)
+}
+
+fn block_decrypt_in_place<'m, S: Suite>(
+    message: EncryptedMessage<'m, S>,
+    d: &generic_ec::NonZero<generic_ec::SecretScalar<S::E>>,
+) -> Result<&'m mut [u8], DecError>
+where
+    S::Mac: digest::Mac + cipher::KeyInit,
+    S::Dec: cipher::KeyIvInit + cipher::BlockDecryptMut,
+{
+    // Byte conversion of step 1 and 2 is done separately
+
+    let r = message.ephemeral_key;
+    let m = message.message;
+    let tag = message.tag;
+
+    // 3. Verify the validity of the ephemeral key - unnecessary as all
+    // verification steps outlined in 3.2.2.1 of SECG SEC-1 (including non-zero
+    // point) are encoded in types and thus are achieved by construction
+
+    // Steps 4-7 encapsulated in KEM
+    let mut cipher_key = cipher::Key::<S::Dec>::default();
+    let mut mac_key = cipher::Key::<S::Mac>::default();
+    ecies_kem(r, d, &mut cipher_key, &mut mac_key).map_err(DecError::Kdf)?;
+
+    // Use zero IV since the key never repeats
+    let cipher_iv = cipher::Iv::<S::Dec>::default();
+    let cipher: S::Dec = cipher::KeyIvInit::new(&cipher_key, &cipher_iv);
+    let mac: S::Mac = digest::Mac::new(&mac_key);
+
+    // 8. Verify MAC
+    mac.chain_update(&*m)
+        .verify(&tag)
+        .map_err(DecError::MacInvalid)?;
+
+    // 9. Decrypt message
+    eprintln!("decrypting length {}", m.len());
+    let s = cipher::BlockDecryptMut::decrypt_padded_mut::<cipher::block_padding::Pkcs7>(cipher, m)
+        .map_err(DecError::PadError)?;
+    let len_without_padding = s.len();
+
+    // 10. Output message
+    Ok(&mut m[..len_without_padding])
 }
 
 impl<'m, S: Suite> EncryptedMessage<'m, S> {
@@ -361,6 +451,23 @@ impl<'m, S: Suite> EncryptedMessage<'m, S> {
     }
 }
 
+fn with_copy<S: Suite>(
+    message: &[u8],
+    run: impl FnOnce(&mut [u8]) -> Result<EncryptedMessage<'_, S>, EncError>,
+) -> Result<Vec<u8>, EncError> {
+    let key_len = generic_ec::Point::<S::E>::serialized_len(true);
+    let mac_len = <MacSize<S> as cipher::typenum::Unsigned>::USIZE;
+    let mut bytes = vec![0; key_len + message.len() + mac_len];
+    let message_slice = &mut bytes[key_len..(key_len + message.len())];
+    message_slice.copy_from_slice(message);
+    let EncryptedMessage {
+        ephemeral_key, tag, ..
+    } = run(message_slice)?;
+    bytes[..key_len].copy_from_slice(&ephemeral_key.to_bytes(true));
+    bytes[(key_len + message.len())..].copy_from_slice(&tag);
+    Ok(bytes)
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum EncError {
     #[error("DH produced zero")]
@@ -384,7 +491,7 @@ pub enum DecError {
     #[error("Key stream end (too much data supplied): {0}")]
     StreamEnd(cipher::StreamCipherError),
     #[error("Pad error {0}")]
-    PadError(cipher::inout::PadError),
+    PadError(cipher::block_padding::UnpadError),
 }
 
 #[derive(Debug, thiserror::Error)]

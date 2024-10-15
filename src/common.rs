@@ -1,5 +1,5 @@
 macro_rules! make_tests {
-    () => {
+    ($specific_tests:tt) => {
         #[cfg(test)]
         mod common_test {
             use std::ops::Deref as _;
@@ -17,24 +17,11 @@ macro_rules! make_tests {
                     bytes
                 };
 
-                let mut encrypted_bytes;
-                let encrypted_message = {
-                    encrypted_bytes = original_message.clone();
-                    pubkey
-                        .encrypt_in_place(&mut encrypted_bytes, &mut rng)
-                        .unwrap()
-                };
+                let mut encrypted_message = pubkey.encrypt(&original_message, &mut rng).unwrap();
 
-                let mut decrypted_bytes;
-                let decrypted_message = {
-                    decrypted_bytes = encrypted_message.message.to_vec();
-                    let message = super::EncryptedMessage {
-                        ephemeral_key: encrypted_message.ephemeral_key,
-                        message: &mut decrypted_bytes,
-                        tag: encrypted_message.tag,
-                    };
-                    key.decrypt_in_place(message).unwrap()
-                };
+                let parsed_message =
+                    super::EncryptedMessage::from_bytes(&mut encrypted_message).unwrap();
+                let decrypted_message = key.decrypt_in_place(parsed_message).unwrap();
 
                 assert_eq!(original_message, decrypted_message);
             }
@@ -62,30 +49,6 @@ macro_rules! make_tests {
             }
 
             #[test]
-            fn encrypt_decrypt_inplace_ornot() {
-                let mut rng = rand_dev::DevRng::new();
-                let key = super::PrivateKey::generate(&mut rng);
-                let pubkey = key.public_key();
-
-                let mut bytes = vec![0u8; 1337];
-                rand_core::RngCore::fill_bytes(&mut rng, &mut bytes);
-                let original = bytes.clone();
-
-                let mut encrypted = pubkey.encrypt(&bytes, &mut rng.clone()).unwrap();
-                let encrypted_ = pubkey
-                    .encrypt_in_place(&mut bytes, &mut rng)
-                    .unwrap()
-                    .to_bytes();
-                assert_eq!(encrypted, encrypted_);
-
-                let encrypted = super::EncryptedMessage::from_bytes(&mut encrypted).unwrap();
-                let decrypted = key.decrypt(&encrypted).unwrap();
-                let decrypted_ = key.decrypt_in_place(encrypted).unwrap();
-                assert_eq!(decrypted_, decrypted);
-                assert_eq!(original, decrypted);
-            }
-
-            #[test]
             fn key_encode() {
                 let mut rng = rand_dev::DevRng::new();
 
@@ -99,7 +62,71 @@ macro_rules! make_tests {
                 let pubkey_ = super::PublicKey::from_bytes(&key_bytes).unwrap();
                 assert_eq!(pubkey, pubkey_);
             }
+
+            internal_make_specific_tests!($specific_tests);
         }
     };
 }
 pub(crate) use make_tests;
+
+#[cfg(test)]
+macro_rules! internal_make_specific_tests {
+    ("stream") => {
+        #[test]
+        fn encrypt_decrypt_inplace_ornot() {
+            let mut rng = rand_dev::DevRng::new();
+            let key = super::PrivateKey::generate(&mut rng);
+            let pubkey = key.public_key();
+
+            let mut bytes = vec![0u8; 1337];
+            rand_core::RngCore::fill_bytes(&mut rng, &mut bytes);
+            let original = bytes.clone();
+
+            let mut encrypted = pubkey.encrypt(&bytes, &mut rng.clone()).unwrap();
+            let encrypted_ = pubkey
+                .encrypt_in_place(&mut bytes, &mut rng)
+                .unwrap()
+                .to_bytes();
+
+            assert_eq!(encrypted, encrypted_);
+
+            let encrypted = super::EncryptedMessage::from_bytes(&mut encrypted).unwrap();
+            let decrypted = key.decrypt(&encrypted).unwrap();
+            let decrypted_ = key.decrypt_in_place(encrypted).unwrap();
+            assert_eq!(decrypted_, decrypted);
+            assert_eq!(original, decrypted);
+        }
+    };
+    ("block") => {
+        #[test]
+        fn encrypt_decrypt_inplace_ornot() {
+            let mut rng = rand_dev::DevRng::new();
+            let key = super::PrivateKey::generate(&mut rng);
+            let pubkey = key.public_key();
+
+            let mut bytes = vec![0u8; 1337];
+            rand_core::RngCore::fill_bytes(&mut rng, &mut bytes);
+            let original = bytes.clone();
+
+            let mut encrypted = pubkey.encrypt(&bytes, &mut rng.clone()).unwrap();
+
+            let size_with_pad = bytes.len() + crate::pad_size::<super::S>(bytes.len());
+            bytes.resize(size_with_pad, 0);
+            let encrypted_ = pubkey
+                .encrypt_in_place(&mut bytes, original.len(), &mut rng)
+                .unwrap()
+                .to_bytes();
+
+            assert_eq!(encrypted, encrypted_);
+
+            let encrypted = super::EncryptedMessage::from_bytes(&mut encrypted).unwrap();
+            let decrypted = key.decrypt(&encrypted).unwrap();
+            let decrypted_ = key.decrypt_in_place(encrypted).unwrap();
+            assert_eq!(decrypted_, decrypted);
+            assert_eq!(original, decrypted);
+        }
+    };
+    ($($_:tt)*) => {
+        compile_error!("make_tests! macro only supports \"block\" and \"stream\" parameters");
+    };
+}
