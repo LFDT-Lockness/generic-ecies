@@ -1,3 +1,29 @@
+//! Instantiation of ECIES with the following parameters:
+//!
+//! * Curve25519 as the elliptic curve
+//! * XSalsa20 as the symmetric cipher
+//! * HMAC-SHA256 as the message authentication code
+//!
+//! ## Example of usage
+//! ```rust
+//! # let mut rng = rand_dev::DevRng::new();
+//! use generic_ecies::curve25519xsalsa20hmac as ecies;
+//! // Use EdDSA key as openssl generates it instead of Ed25519 private scalar
+//! let eddsa_private_key_bytes = b"eddsa priv key is any 32 bytes^^";
+//! let private_key = ecies::PrivateKey::from_eddsa_pkey_bytes(eddsa_private_key_bytes).unwrap();
+//! let public_key = private_key.public_key();
+//!
+//! // Encrypt
+//! let message = b"Putin is an agent of kremlin";
+//! let mut encrypted_message = public_key.encrypt(message, &mut rng).unwrap();
+//!
+//! // Decrypt
+//! let parsed_message = ecies::EncryptedMessage::from_bytes(&mut encrypted_message).unwrap();
+//! let decrypted_message = private_key.decrypt_in_place(parsed_message).unwrap();
+//! assert_eq!(decrypted_message, message);
+//! ```
+
+/// The ciphersuite for curve25519+xsalsa20+hmacsha256
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct S;
 
@@ -8,11 +34,21 @@ impl super::Suite for S {
     type Dec = salsa20::XSalsa20;
 }
 
+/// Private key of this suite, a scalar of the Ed25519 curve
 pub type PrivateKey = crate::PrivateKey<S>;
+/// Public key of this suite, a point on the Ed25519 curve
 pub type PublicKey = crate::PublicKey<S>;
 pub type EncryptedMessage<'m> = crate::EncryptedMessage<'m, S>;
 
 impl PublicKey {
+    /// Encrypt the message bytes in place; specialization for
+    /// `curve25519xsalsa20hmac`
+    ///
+    /// You can interact with the encrypted bytes through the returned
+    /// [`EncryptedMessage`], but be careful that changing them will invalidate
+    /// the mac.
+    ///
+    /// Convenient alias for [`PublicKey::stream_encrypt_in_place`]
     pub fn encrypt_in_place<'m>(
         &self,
         message: &'m mut [u8],
@@ -21,6 +57,10 @@ impl PublicKey {
         self.stream_encrypt_in_place(message, rng)
     }
 
+    /// Encrypt the message bytes into a new buffer. Returnes the encoded bytes
+    /// of [`EncryptedMessage`]. Specialization for `curve25519xsalsa20hmac`
+    ///
+    /// Convenient alias for [`PublicKey::stream_encrypt`]
     pub fn encrypt(
         &self,
         message: &[u8],
@@ -31,6 +71,15 @@ impl PublicKey {
 }
 
 impl PrivateKey {
+    /// Decrypt the message bytes in place; specialization for
+    /// `curve25519xsalsa20hmac`
+    ///
+    /// When you have a buffer of bytes to decrypt, you first need to parse it
+    /// with `EncryptedMessage::from_bytes`, and then decrypt the structure
+    /// using this funciton. It will modify the bytes in the buffer and return a
+    /// slice to them.
+    ///
+    /// Convenient alias to [`PrivateKey::stream_decrypt_in_place`]
     pub fn decrypt_in_place<'m>(
         &self,
         message: EncryptedMessage<'m>,
@@ -38,39 +87,17 @@ impl PrivateKey {
         self.stream_decrypt_in_place(message)
     }
 
+    /// Decrypt the message bytes into a new buffer; specialization for
+    /// `curve25519xsalsa20hmac`
+    ///
+    /// When you have a buffer of bytes to decrypt, you first need to parse it
+    /// with `EncryptedMessage::from_bytes`, and then decrypt the structure
+    /// using this funciton. It will copy the message bytes into a new buffer
+    /// and return a [`Vec`] containing them.
+    ///
+    /// Convenient alias to [`PrivateKey::decrypt_in_place`]
     pub fn decrypt(&self, message: &EncryptedMessage<'_>) -> Result<Vec<u8>, crate::DecError> {
         self.stream_decrypt(message)
-    }
-
-    /// Since eddsa secret key is not a scalar, and most tools that call
-    /// themselves ed25519 are actually eddsa, we need to convert from eddsa key
-    /// to a scalar.
-    ///
-    /// Returns `None` if the bytes hash to zero (this has a vanishing
-    /// probability of occuring)
-    pub fn from_eddsa_pkey_bytes(bytes: &[u8; 32]) -> Option<Self> {
-        use sha2::Digest as _;
-        let scalar_bytes = sha2::Sha512::new().chain_update(bytes).finalize();
-        let mut scalar_bytes = zeroize::Zeroizing::<[u8; 64]>::new(scalar_bytes.into());
-        let scalar_bytes = &mut scalar_bytes[0..32];
-
-        // The lowest three bits of the first octet are cleared
-        scalar_bytes[0] &= 0b1111_1000;
-        // the highest bit of the last octet is cleared
-        scalar_bytes[31] &= 0b0111_1111;
-        // and the second highest bit of the last octet is set
-        scalar_bytes[31] |= 0b0100_0000;
-
-        let mut scalar = generic_ec::Scalar::<generic_ec::curves::Ed25519>::from_le_bytes_mod_order(
-            scalar_bytes,
-        );
-        let scalar = generic_ec::SecretScalar::new(&mut scalar);
-        let scalar =
-            generic_ec::NonZero::<generic_ec::SecretScalar<generic_ec::curves::Ed25519>>::try_from(
-                scalar,
-            )
-            .ok()?;
-        Some(Self { scalar })
     }
 }
 

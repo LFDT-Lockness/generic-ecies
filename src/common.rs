@@ -1,3 +1,40 @@
+#[cfg(feature = "curve-ed25519")]
+impl<S> crate::PrivateKey<S>
+where
+    S: crate::Suite<E = generic_ec::curves::Ed25519>,
+{
+    /// Since eddsa secret key is not a scalar, and most tools that call
+    /// themselves ed25519 are actually eddsa, we need to convert from eddsa key
+    /// to a scalar.
+    ///
+    /// Returns `None` if the bytes hash to zero (this has a vanishing
+    /// probability of occuring)
+    pub fn from_eddsa_pkey_bytes(bytes: &[u8; 32]) -> Option<Self> {
+        use sha2::Digest as _;
+        let scalar_bytes = sha2::Sha512::new().chain_update(bytes).finalize();
+        let mut scalar_bytes = zeroize::Zeroizing::<[u8; 64]>::new(scalar_bytes.into());
+        let scalar_bytes = &mut scalar_bytes[0..32];
+
+        // The lowest three bits of the first octet are cleared
+        scalar_bytes[0] &= 0b1111_1000;
+        // the highest bit of the last octet is cleared
+        scalar_bytes[31] &= 0b0111_1111;
+        // and the second highest bit of the last octet is set
+        scalar_bytes[31] |= 0b0100_0000;
+
+        let mut scalar = generic_ec::Scalar::<generic_ec::curves::Ed25519>::from_le_bytes_mod_order(
+            scalar_bytes,
+        );
+        let scalar = generic_ec::SecretScalar::new(&mut scalar);
+        let scalar =
+            generic_ec::NonZero::<generic_ec::SecretScalar<generic_ec::curves::Ed25519>>::try_from(
+                scalar,
+            )
+            .ok()?;
+        Some(Self { scalar })
+    }
+}
+
 macro_rules! make_tests {
     ($specific_tests:tt) => {
         #[cfg(test)]

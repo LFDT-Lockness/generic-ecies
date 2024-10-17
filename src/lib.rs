@@ -1,4 +1,49 @@
-//! Based on [SECG SEC-1](http://www.secg.org/sec1-v2.pdf)
+//! ECIES is a scheme for efficient ciphers with asymmetric key using elliptic
+//! curves and symmetric ciphers. This implementation is generic in its
+//! components, thanks to using [`generic_ec`] and `RustCrypto` traits. You can
+//! use the ciphersuites defined by us in advance, like
+//! [`curve25519xsalsa20hmac`] and [`curve25519aes128_cbchmac`], or you can
+//! define your own [`Suite`].
+//!
+//! This implementation is based on [SECG
+//! SEC-1](http://www.secg.org/sec1-v2.pdf)
+//!
+//! ## Example
+//!
+//! ```rust
+//! # let mut rng = rand_dev::DevRng::new();
+//! // First, you need to select your ciphersuite
+//! use generic_ecies::curve25519xsalsa20hmac as ecies;
+//!
+//! // Keygen
+//! let private_key = ecies::PrivateKey::generate(&mut rng);
+//! let public_key = private_key.public_key();
+//! // Send public key to the other party
+//! let public_key_bytes = public_key.to_bytes();
+//! // Save private key to a secure place
+//! let private_key_bytes = private_key.to_bytes();
+//!
+//! // Encryption
+//! let encryption_key = ecies::PublicKey::from_bytes(public_key_bytes).unwrap();
+//! let mut message = b"Harambe was an inside job".to_vec();
+//! # let original_message = message.clone();
+//! let encrypted_message = encryption_key.stream_encrypt_in_place(&mut message, &mut rng).unwrap();
+//! // Send message to the receiving party
+//! let mut message_bytes = encrypted_message.to_bytes();
+//!
+//! // Decryption
+//! let decryption_key = ecies::PrivateKey::from_bytes(private_key_bytes).unwrap();
+//! let message = ecies::EncryptedMessage::from_bytes(&mut message_bytes).unwrap();
+//! let decrypted_message = decryption_key.decrypt_in_place(message).unwrap();
+//!
+//! # assert_eq!(original_message, decrypted_message);
+//! ```
+//!
+//! You can find more examples in the predefined ciphersuites:
+//! [`curve25519xsalsa20hmac`] and [`curve25519aes128_cbchmac`]
+
+#![forbid(clippy::disallowed_methods, missing_docs, unsafe_code)]
+#![cfg_attr(not(test), forbid(unused_crate_dependencies))]
 
 #[macro_use]
 mod common;
@@ -9,14 +54,25 @@ pub mod curve25519aes128_cbchmac;
 pub mod curve25519xsalsa20hmac;
 
 use cipher::generic_array::GenericArray;
+use digest::Mac as _;
 use generic_ec::Curve;
-use hmac::Mac as _;
 use rand_core::{CryptoRng, RngCore};
 
+/// A suite of cryptographic protocols to use for ECIES
+///
+/// Thanks for UC-security, any secure protocols can work together.
+///
+/// This crate has several suites ready-made, such as
+/// [`curve25519xsalsa20hmac`] and [`curve25519aes128_cbchmac`].
 pub trait Suite {
+    /// Elliptic curve provided by [`generic_ec`], for use in ECDH
     type E: Curve;
+    /// MAC provided by [`digest`]
     type Mac: digest::OutputSizeUser;
+    /// Encryption provided by [`cipher`], for use for symmetric encryption
     type Enc;
+    /// Decryption corresponding to `Enc`. For stream cipher will usually be
+    /// the same as `Enc`
     type Dec;
 }
 
@@ -33,40 +89,69 @@ where
     block_size - (message_len % block_size)
 }
 
+/// Private key is a scalar of the elliptic curve in the chosen suite.
+///
+/// You can obtain a private key by generating it with [`PrivateKey::generate`],
+/// or by reading it from bytes with [`PrivateKey::from_bytes`].
+///
+/// The scalars are stored as bytes in big-endian format, which might not always
+/// be compatible with other software working with this elliptic curve. For
+/// example, for EdDSA compatability we provide a method
+/// [`PrivateKey::from_eddsa_pkey_bytes`]
 #[derive(Clone, Debug)]
 pub struct PrivateKey<S: Suite> {
     /// `d` in the standard
     pub scalar: generic_ec::NonZero<generic_ec::SecretScalar<S::E>>,
 }
 
+/// Public key is a point on the elliptic curve of the chosen suite.
+///
+/// You can obtain a public key from a newly generated private key by
+/// [`PrivateKey::public_key`], or by reading it from bytes with
+/// [`PublicKey::from_bytes`]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PublicKey<S: Suite> {
     /// `Q` in the standard
     pub point: generic_ec::NonZero<generic_ec::Point<S::E>>,
 }
 
+/// Represents a parsed message. To convert to and from platform independent
+/// wire bytes use [`EncryptedMessage::from_bytes`] and
+/// [`EncryptedMessage::to_bytes`]
+///
+/// The borrows the bytes to be encrypted instead of owning them, which allows
+/// for efficient in-place encryption and decryption.
 #[derive(Debug, PartialEq)]
 pub struct EncryptedMessage<'m, S: Suite> {
+    /// Ephemeral key in DH in the protocol
     pub ephemeral_key: generic_ec::NonZero<generic_ec::Point<S::E>>,
+    /// Encrypted bytes of the message, stored elsewhere
     pub message: &'m mut [u8],
+    /// MAC tag of encrypted bytes
     pub tag: GenericArray<u8, MacSize<S>>,
 }
 
 impl<S: Suite> PrivateKey<S> {
+    /// Generate random key using the provided [`CryptoRng`]
     pub fn generate(rng: &mut (impl RngCore + CryptoRng)) -> Self {
         let scalar = generic_ec::NonZero::<generic_ec::SecretScalar<S::E>>::random(rng);
         Self { scalar }
     }
+    /// Read the bytes as a big-endian number. This might not necessarily be
+    /// compatible with other software for working with elliptic curves.
     pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Option<Self> {
         let scalar = generic_ec::SecretScalar::from_be_bytes(bytes.as_ref()).ok()?;
         let scalar = generic_ec::NonZero::try_from(scalar).ok()?;
         Some(Self { scalar })
     }
+    /// Stores the scalar as a big-endian number. This might not necessarily be
+    /// compatible with other software for working with elliptic curves.
     pub fn to_bytes(&self) -> Vec<u8> {
         let scalar: &generic_ec::Scalar<S::E> = self.scalar.as_ref();
         scalar.to_be_bytes().to_vec()
     }
 
+    /// Compute the associated public key `Q = g * d`
     pub fn public_key(&self) -> PublicKey<S> {
         let point = generic_ec::Point::generator() * &self.scalar;
         PublicKey { point }
@@ -74,15 +159,25 @@ impl<S: Suite> PrivateKey<S> {
 }
 
 impl<S: Suite> PublicKey<S> {
+    /// Read the encoded scalar. Should be compatible with most other software
+    /// for working with elliptic curves.
     pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Option<Self> {
         let point = generic_ec::Point::<S::E>::from_bytes(bytes).ok()?;
         let point = generic_ec::NonZero::<generic_ec::Point<S::E>>::try_from(point).ok()?;
         Some(Self { point })
     }
+    /// Write the encoded scalar. Should be compatible with most other software
+    /// for working with elliptic curves.
     pub fn to_bytes(&self) -> Vec<u8> {
         self.point.to_bytes(true).to_vec()
     }
 
+    /// Encrypt the message bytes in place. Variant for suites with stream
+    /// ciphers.
+    ///
+    /// You can interact with the encrypted bytes through the returned
+    /// [`EncryptedMessage`], but be careful that changing them will invalidate
+    /// the mac.
     pub fn stream_encrypt_in_place<'m>(
         &self,
         message: &'m mut [u8],
@@ -95,6 +190,12 @@ impl<S: Suite> PublicKey<S> {
         stream_encrypt_in_place::<S, _>(message, &self.point, rng)
     }
 
+    /// Encrypt the message bytes in place. Variant for suites with block
+    /// ciphers. Uses PKCS7 padding.
+    ///
+    /// You can interact with the encrypted bytes through the returned
+    /// [`EncryptedMessage`], but be careful that changing them will invalidate
+    /// the mac.
     pub fn block_encrypt_in_place<'m>(
         &self,
         message: &'m mut [u8],
@@ -108,6 +209,10 @@ impl<S: Suite> PublicKey<S> {
         block_encrypt_in_place::<S, _>(message, data_len, &self.point, rng)
     }
 
+    /// Encrypt the message bytes into a new buffer. Variant for suites with
+    /// stream ciphers.
+    ///
+    /// Returnes the encoded bytes of [`EncryptedMessage`]
     pub fn stream_encrypt(
         &self,
         message: &[u8],
@@ -120,6 +225,10 @@ impl<S: Suite> PublicKey<S> {
         with_copy(message, |msg| self.stream_encrypt_in_place(msg, rng))
     }
 
+    /// Encrypt the message bytes into a new buffer. Variant for suites with
+    /// block ciphers. Uses PKCS7 padding.
+    ///
+    /// Returnes the encoded bytes of [`EncryptedMessage`]
     pub fn block_encrypt(
         &self,
         message: &[u8],
@@ -151,6 +260,13 @@ impl<S: Suite> PublicKey<S> {
 }
 
 impl<S: Suite> PrivateKey<S> {
+    /// Decrypt the message bytes in place. Variant for suites with stream
+    /// ciphers.
+    ///
+    /// When you have a buffer of bytes to decrypt, you first need to parse it
+    /// with `EncryptedMessage::from_bytes`, and then decrypt the structure
+    /// using this funciton. It will modify the bytes in the buffer and return a
+    /// slice to them.
     pub fn stream_decrypt_in_place<'m>(
         &self,
         message: EncryptedMessage<'m, S>,
@@ -162,6 +278,13 @@ impl<S: Suite> PrivateKey<S> {
         stream_decrypt_in_place(message, &self.scalar)
     }
 
+    /// Decrypt the message bytes into a new buffer. Variant for suites with
+    /// stream ciphers.
+    ///
+    /// When you have a buffer of bytes to decrypt, you first need to parse it
+    /// with `EncryptedMessage::from_bytes`, and then decrypt the structure
+    /// using this funciton. It will copy the message bytes into a new buffer
+    /// and return a [`Vec`] containing them.
     pub fn stream_decrypt(&self, message: &EncryptedMessage<'_, S>) -> Result<Vec<u8>, DecError>
     where
         S::Mac: digest::Mac + cipher::KeyInit,
@@ -178,6 +301,13 @@ impl<S: Suite> PrivateKey<S> {
         Ok(msg_bytes)
     }
 
+    /// Decrypt the message bytes in place. Variant for suites with block
+    /// ciphers. Uses PKCS7 padding.
+    ///
+    /// When you have a buffer of bytes to decrypt, you first need to parse it
+    /// with `EncryptedMessage::from_bytes`, and then decrypt the structure
+    /// using this funciton. It will modify the bytes in the buffer and return a
+    /// slice to them.
     pub fn block_decrypt_in_place<'m>(
         &self,
         message: EncryptedMessage<'m, S>,
@@ -189,6 +319,13 @@ impl<S: Suite> PrivateKey<S> {
         block_decrypt_in_place(message, &self.scalar)
     }
 
+    /// Decrypt the message bytes into a new buffer. Variant for suites with
+    /// block ciphers. Uses PKCS7 padding.
+    ///
+    /// When you have a buffer of bytes to decrypt, you first need to parse it
+    /// with `EncryptedMessage::from_bytes`, and then decrypt the structure
+    /// using this funciton. It will copy the message bytes into a new buffer
+    /// and return a [`Vec`] containing them.
     pub fn block_decrypt(&self, message: &EncryptedMessage<'_, S>) -> Result<Vec<u8>, DecError>
     where
         S::Mac: digest::Mac + cipher::KeyInit,
@@ -403,6 +540,9 @@ where
 }
 
 impl<'m, S: Suite> EncryptedMessage<'m, S> {
+    /// Convert the message triplet to bytes following the description in SECG
+    /// SEC-1: `ephemeral_key || message || MAC`. Ephemeral key is stored in
+    /// compressed form when supported.
     pub fn to_bytes(&self) -> Vec<u8> {
         // Followint SECG SEC-1 part 5.1.3, byte representation is a
         // concatenation of component represenatations
@@ -414,6 +554,7 @@ impl<'m, S: Suite> EncryptedMessage<'m, S> {
         bytes
     }
 
+    /// Read the message triplet from bytes
     pub fn from_bytes(bytes: &'m mut [u8]) -> Result<Self, DeserializeError> {
         // No only for convenience, but because borrow checker can't say that
         // `len` doesn't borrow for lifetime of its return value?
@@ -468,6 +609,10 @@ fn with_copy<S: Suite>(
     Ok(bytes)
 }
 
+/// Error when encrypting message
+///
+/// [`EncError::PadError`] may happen when an invalid size buffer is supplied for in-place
+/// encryption. Other errors should happen in very rare cases.
 #[derive(Debug, thiserror::Error)]
 pub enum EncError {
     #[error("DH produced zero")]
@@ -480,6 +625,9 @@ pub enum EncError {
     PadError(cipher::inout::PadError),
 }
 
+/// Error when encrypting message
+///
+/// Most errors can happen when a message has been tampered with.
 #[derive(Debug, thiserror::Error)]
 pub enum DecError {
     #[error("MAC verification failed: {0}")]
@@ -494,6 +642,7 @@ pub enum DecError {
     PadError(cipher::block_padding::UnpadError),
 }
 
+/// Error when deserializing the byte representation of a message
 #[derive(Debug, thiserror::Error)]
 pub enum DeserializeError {
     #[error("Ephemeral DH key is invalid: {0}; {1}")]
