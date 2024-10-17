@@ -8,38 +8,7 @@
 //! This implementation is based on [SECG
 //! SEC-1](http://www.secg.org/sec1-v2.pdf)
 //!
-//! ## Example
-//!
-//! ```rust
-//! # let mut rng = rand_dev::DevRng::new();
-//! // First, you need to select your ciphersuite
-//! use generic_ecies::curve25519xsalsa20hmac as ecies;
-//!
-//! // Keygen
-//! let private_key = ecies::PrivateKey::generate(&mut rng);
-//! let public_key = private_key.public_key();
-//! // Send public key to the other party
-//! let public_key_bytes = public_key.to_bytes();
-//! // Save private key to a secure place
-//! let private_key_bytes = private_key.to_bytes();
-//!
-//! // Encryption
-//! let encryption_key = ecies::PublicKey::from_bytes(public_key_bytes).unwrap();
-//! let mut message = b"Harambe was an inside job".to_vec();
-//! # let original_message = message.clone();
-//! let encrypted_message = encryption_key.stream_encrypt_in_place(&mut message, &mut rng).unwrap();
-//! // Send message to the receiving party
-//! let mut message_bytes = encrypted_message.to_bytes();
-//!
-//! // Decryption
-//! let decryption_key = ecies::PrivateKey::from_bytes(private_key_bytes).unwrap();
-//! let message = ecies::EncryptedMessage::from_bytes(&mut message_bytes).unwrap();
-//! let decrypted_message = decryption_key.decrypt_in_place(message).unwrap();
-//!
-//! # assert_eq!(original_message, decrypted_message);
-//! ```
-//!
-//! You can find more examples in the predefined ciphersuites:
+//! You can find examples of usage in the predefined ciphersuites:
 //! [`curve25519xsalsa20hmac`] and [`curve25519aes128_cbchmac`]
 
 #![forbid(clippy::disallowed_methods, missing_docs, unsafe_code)]
@@ -615,12 +584,15 @@ fn with_copy<S: Suite>(
 /// encryption. Other errors should happen in very rare cases.
 #[derive(Debug, thiserror::Error)]
 pub enum EncError {
-    #[error("DH produced zero")]
-    ZeroDH,
+    /// Rare error for KDF. May be caused by invalid EC instance
     #[error("KDF failed: {0}")]
     Kdf(hkdf::InvalidLength),
+    /// Rare error fo symmetric encryption. May be cause by trying to encrypt
+    /// too much data
     #[error("Key stream end (too much data supplied): {0}")]
     StreamEnd(cipher::StreamCipherError),
+    /// Error of symmetric encryption, caused by passing a too small buffer to
+    /// [`PublicKey::block_encrypt_in_place`]
     #[error("Pad error {0}")]
     PadError(cipher::inout::PadError),
 }
@@ -630,14 +602,17 @@ pub enum EncError {
 /// Most errors can happen when a message has been tampered with.
 #[derive(Debug, thiserror::Error)]
 pub enum DecError {
+    /// Invalid MAC, caused by tampering with the message or using the wrong key
     #[error("MAC verification failed: {0}")]
     MacInvalid(digest::MacError),
-    #[error("DH produced zero")]
-    ZeroDH,
+    /// Rare error for KDF. May be caused by invalid EC instance
     #[error("KDF failed: {0}")]
     Kdf(hkdf::InvalidLength),
+    /// Rare error fo symmetric encryption. May be cause by trying to encrypt
+    /// too much data
     #[error("Key stream end (too much data supplied): {0}")]
     StreamEnd(cipher::StreamCipherError),
+    /// Error unpadding, might be caused by sender sending a corrupted message
     #[error("Pad error {0}")]
     PadError(cipher::block_padding::UnpadError),
 }
@@ -645,11 +620,13 @@ pub enum DecError {
 /// Error when deserializing the byte representation of a message
 #[derive(Debug, thiserror::Error)]
 pub enum DeserializeError {
+    /// Failed to read [`EncryptedMessage::ephemeral_key`]
     #[error("Ephemeral DH key is invalid: {0}; {1}")]
     InvalidPoint(
         generic_ec::errors::InvalidPoint,
         generic_ec::errors::InvalidPoint,
     ),
+    /// Failed to read [`EncryptedMessage::ephemeral_key`]
     #[error("Ephemeral DH key is zero")]
     ZeroPoint(#[from] generic_ec::errors::ZeroPoint),
 }

@@ -35,9 +35,9 @@ where
     }
 }
 
+#[cfg(test)]
 macro_rules! make_tests {
     ($specific_tests:tt) => {
-        #[cfg(test)]
         mod common_test {
             use std::ops::Deref as _;
             type E = <super::S as crate::Suite>::E;
@@ -104,6 +104,7 @@ macro_rules! make_tests {
         }
     };
 }
+#[cfg(test)]
 pub(crate) use make_tests;
 
 #[cfg(test)]

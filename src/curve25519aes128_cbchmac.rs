@@ -34,8 +34,11 @@ impl super::Suite for S {
     type Dec = cbc::Decryptor<aes::Aes128>;
 }
 
+/// Private key of this suite, a scalar of the Ed25519 curve
 pub type PrivateKey = crate::PrivateKey<S>;
+/// Public key of this suite, a point on the Ed25519 curve
 pub type PublicKey = crate::PublicKey<S>;
+/// Message encrypted with this ciphersuite
 pub type EncryptedMessage<'m> = crate::EncryptedMessage<'m, S>;
 
 impl PublicKey {
@@ -101,4 +104,5 @@ impl PrivateKey {
     }
 }
 
+#[cfg(test)]
 crate::common::make_tests!("block");
