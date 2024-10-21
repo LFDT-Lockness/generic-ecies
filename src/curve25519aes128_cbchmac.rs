@@ -8,7 +8,7 @@
 //! ```rust
 //! # let mut rng = rand_dev::DevRng::new();
 //! use generic_ecies::curve25519aes128_cbchmac as ecies;
-//! // Use EdDSA key as openssl generates it instead of Ed25519 private scalar
+//! // Use EdDSA key as openssl generates it instead of Curve25519 private scalar
 //! let eddsa_private_key_bytes = b"eddsa priv key is any 32 bytes^^";
 //! let private_key = ecies::PrivateKey::from_eddsa_pkey_bytes(eddsa_private_key_bytes).unwrap();
 //! let public_key = private_key.public_key();
@@ -25,7 +25,9 @@
 
 /// The ciphersuite for curve25519+aes128_cbc+hmacsha256
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct S;
+pub struct Curve25519Aes128cbcHmacsha256;
+
+type S = Curve25519Aes128cbcHmacsha256;
 
 impl super::Suite for S {
     type E = generic_ec::curves::Ed25519;
@@ -34,9 +36,9 @@ impl super::Suite for S {
     type Dec = cbc::Decryptor<aes::Aes128>;
 }
 
-/// Private key of this suite, a scalar of the Ed25519 curve
+/// Private key of this suite, a scalar of Curve25519
 pub type PrivateKey = crate::PrivateKey<S>;
-/// Public key of this suite, a point on the Ed25519 curve
+/// Public key of this suite, a point on Curve25519
 pub type PublicKey = crate::PublicKey<S>;
 /// Message encrypted with this ciphersuite
 pub type EncryptedMessage<'m> = crate::EncryptedMessage<'m, S>;
