@@ -47,6 +47,14 @@ impl PublicKey {
     /// Encrypt the message bytes in place; specialization for
     /// `curve25519aes128_cbchmac`. Uses PKCS7 padding.
     ///
+    /// - `message` - the buffer containing the message to encrypt, plus enough
+    ///   space for padding
+    /// - `data_len` - length of the message in the buffer
+    ///
+    /// Given a message `m`, the size of the buffer should be at least `m.len() +
+    /// pad_size(m.len())`. If the buffer size is too small, the function will
+    /// return [`crate::EncError::PadError`]
+    ///
     /// You can interact with the encrypted bytes through the returned
     /// [`EncryptedMessage`], but be careful that changing them will invalidate
     /// the mac.
