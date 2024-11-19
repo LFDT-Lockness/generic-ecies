@@ -77,3 +77,12 @@ jobs:
     - uses: actions/checkout@v3
     - name: Check changelogs
       run: ./.github/changelog.sh
+  check-publish:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: Swatinem/rust-cache@v2
+      with:
+        cache-on-failure: "true"
+    - name: Dry-run publish
+      run: cargo publish -p generic-ecies --dry-run
