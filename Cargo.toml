@@ -3,7 +3,7 @@ name = "generic-ecies"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/dfns/generic-ecies"
+repository = "https://github.com/LFDT-Lockness/generic-ecies"
 description = "ECIES encryption scheme for generic parameters"
 readme = "README.md"
 
