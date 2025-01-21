@@ -25,12 +25,12 @@
 
 /// The ciphersuite for curve25519+aes128_cbc+hmacsha256
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Curve25519Aes128cbcHmacsha256;
+pub struct Ed25519Aes128cbcHmacsha256;
 
-type S = Curve25519Aes128cbcHmacsha256;
+type S = Ed25519Aes128cbcHmacsha256;
 
 impl super::Suite for S {
-    type E = generic_ec::curves::Ed25519;
+    type Kem = crate::kem::Ed25519;
     type Mac = hmac::Hmac<sha2::Sha256>;
     type Enc = cbc::Encryptor<aes::Aes128>;
     type Dec = cbc::Decryptor<aes::Aes128>;

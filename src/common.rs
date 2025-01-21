@@ -1,14 +1,14 @@
-#[cfg(feature = "curve-ed25519")]
+#[cfg(feature = "ecdh-ed25519")]
 impl<S> crate::PrivateKey<S>
 where
-    S: crate::Suite<E = generic_ec::curves::Ed25519>,
+    S: crate::Suite<Kem = crate::kem::Ed25519>,
 {
     /// Since eddsa secret key is not a scalar, and most tools that call
     /// themselves ed25519 are actually eddsa, we need to convert from eddsa key
     /// to a scalar.
     ///
     /// Returns `None` if the bytes hash to zero (this has a vanishing
-    /// probability of occuring)
+    /// probability of occurring)
     pub fn from_eddsa_pkey_bytes(bytes: &[u8; 32]) -> Option<Self> {
         use sha2::Digest as _;
         let scalar_bytes = sha2::Sha512::new().chain_update(bytes).finalize();
@@ -31,7 +31,7 @@ where
                 scalar,
             )
             .ok()?;
-        Some(Self { scalar })
+        Some(Self(scalar))
     }
 }
 
@@ -39,8 +39,9 @@ where
 macro_rules! make_tests {
     ($specific_tests:tt) => {
         mod common_test {
-            use std::ops::Deref as _;
-            type E = <super::S as crate::Suite>::E;
+            use crate::kem::Kem as _;
+
+            type Kem = <super::S as crate::Suite>::Kem;
 
             #[test]
             fn encrypt_decrypt() {
@@ -67,8 +68,11 @@ macro_rules! make_tests {
             fn message_encode() {
                 let mut rng = rand_dev::DevRng::new();
 
-                let ephemeral_key = generic_ec::Point::generator()
-                    * generic_ec::NonZero::<generic_ec::Scalar<E>>::random(&mut rng);
+                let ephemeral_key = {
+                    let sk = Kem::keygen(&mut rng);
+                    let pk = Kem::get_public_key(&sk);
+                    Kem::encaps(&mut rng, &pk).0
+                };
                 let mut message = [0u8; 322];
                 rand_core::RngCore::fill_bytes(&mut rng, &mut message);
                 let mut tag =
@@ -91,13 +95,13 @@ macro_rules! make_tests {
 
                 let key = super::PrivateKey::generate(&mut rng);
                 let key_bytes = key.to_bytes();
-                let key_ = super::PrivateKey::from_bytes(&key_bytes).unwrap();
-                assert_eq!(key.scalar.deref().as_ref(), key_.scalar.deref().as_ref());
+                let key_decoded = super::PrivateKey::from_bytes(&key_bytes).unwrap();
+                assert_eq!(key.public_key(), key_decoded.public_key());
 
                 let pubkey = key.public_key();
-                let key_bytes = pubkey.to_bytes();
-                let pubkey_ = super::PublicKey::from_bytes(&key_bytes).unwrap();
-                assert_eq!(pubkey, pubkey_);
+                let pubkey_bytes = pubkey.to_bytes();
+                let pubkey_decoded = super::PublicKey::from_bytes(&pubkey_bytes).unwrap();
+                assert_eq!(pubkey, pubkey_decoded);
             }
 
             internal_make_specific_tests!($specific_tests);

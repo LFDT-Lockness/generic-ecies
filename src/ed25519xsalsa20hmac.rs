@@ -25,12 +25,12 @@
 
 /// The ciphersuite for curve25519+xsalsa20+hmacsha256
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Curve25519Xsalsa20Hmacsha256;
+pub struct Ed25519Xsalsa20Hmacsha256;
 
-type S = Curve25519Xsalsa20Hmacsha256;
+type S = Ed25519Xsalsa20Hmacsha256;
 
 impl super::Suite for S {
-    type E = generic_ec::curves::Ed25519;
+    type Kem = crate::kem::Ed25519;
     type Mac = hmac::Hmac<sha2::Sha256>;
     type Enc = salsa20::XSalsa20;
     type Dec = salsa20::XSalsa20;

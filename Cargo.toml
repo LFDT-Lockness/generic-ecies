@@ -11,7 +11,7 @@ categories = ["cryptography"]
 keywords = ["elliptic-curves"]
 
 [dependencies]
-generic-ec = { version = "0.4.3" }
+generic-ec = { version = "0.4.3", optional = true }
 digest = { version = "0.10" }
 sha2 = { version = "0.10" }
 hkdf = { version = "0.12" }
@@ -33,10 +33,14 @@ rand_dev = "0.1"
 [features]
 default = []
 
-curve-ed25519 = ["generic-ec/curve-ed25519"]
+ecdh-prime-group = ["generic-ec"]
 
-curve25519xsalsa20hmac = ["dep:salsa20", "curve-ed25519", "dep:hmac", "dep:zeroize"]
-curve25519aes128-cbchmac = ["dep:aes", "dep:cbc", "curve-ed25519", "dep:hmac"]
+ecdh-secp256k1 = ["ecdh-prime-group", "generic-ec/curve-secp256k1"]
+ecdh-secp256r1 = ["ecdh-prime-group", "generic-ec/curve-secp256r1"]
+ecdh-ed25519 = ["ecdh-prime-group", "generic-ec/curve-ed25519"]
+
+ed25519xsalsa20hmac = ["dep:salsa20", "ecdh-ed25519", "dep:hmac", "dep:zeroize"]
+ed25519aes128-cbchmac = ["dep:aes", "dep:cbc", "ecdh-ed25519", "dep:hmac"]
 
 [package.metadata.docs.rs]
 all-features = true
