@@ -7,7 +7,7 @@
 //! ## Example of usage
 //! ```rust
 //! # let mut rng = rand_dev::DevRng::new();
-//! use generic_ecies::curve25519aes128_cbchmac as ecies;
+//! use generic_ecies::ed25519aes128_cbchmac as ecies;
 //! // Use EdDSA key as openssl generates it instead of Curve25519 private scalar
 //! let eddsa_private_key_bytes = b"eddsa priv key is any 32 bytes^^";
 //! let private_key = ecies::PrivateKey::from_eddsa_pkey_bytes(eddsa_private_key_bytes).unwrap();
