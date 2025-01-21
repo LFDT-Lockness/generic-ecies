@@ -92,6 +92,7 @@ pub trait DecodeOne: Sized {
     fn decode_one(bytes: &[u8]) -> Option<(Self, usize)>;
 }
 
+#[cfg(feature = "hkdf")]
 impl KdfOutput for hkdf::Hkdf<sha2::Sha256> {
     fn expand(&self, info: &[u8], out: &mut [u8]) -> Result<(), InvalidLength> {
         self.expand(info, out).map_err(|_| InvalidLength)

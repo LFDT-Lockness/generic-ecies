@@ -41,7 +41,7 @@ pub trait Suite: core::fmt::Debug + Eq {
     /// Key Encapsulation Mechanism to be used. See [`kem`].
     type Kem: kem::Kem;
     /// MAC provided by [`digest`]
-    type Mac: digest::OutputSizeUser;
+    type Mac: digest::Mac + digest::KeyInit;
     /// Encryption provided by [`cipher`], for use for symmetric encryption
     type Enc;
     /// Decryption corresponding to `Enc`. For stream cipher will usually be
@@ -147,7 +147,6 @@ impl<S: Suite> PublicKey<S> {
         rng: &mut (impl RngCore + CryptoRng),
     ) -> Result<EncryptedMessage<'m, S>, EncError>
     where
-        S::Mac: digest::Mac + cipher::KeyInit,
         S::Enc: cipher::KeyIvInit + cipher::StreamCipher,
     {
         stream_encrypt_in_place::<S, _>(message, self, rng)
@@ -174,7 +173,6 @@ impl<S: Suite> PublicKey<S> {
         rng: &mut (impl RngCore + CryptoRng),
     ) -> Result<EncryptedMessage<'m, S>, EncError>
     where
-        S::Mac: digest::Mac + cipher::KeyInit,
         S::Enc: cipher::KeyIvInit + cipher::BlockEncryptMut,
     {
         block_encrypt_in_place::<S, _>(message, data_len, self, rng)
@@ -190,7 +188,6 @@ impl<S: Suite> PublicKey<S> {
         rng: &mut (impl RngCore + CryptoRng),
     ) -> Result<Vec<u8>, EncError>
     where
-        S::Mac: digest::Mac + cipher::KeyInit,
         S::Enc: cipher::KeyIvInit + cipher::StreamCipher,
     {
         with_copy(message, |msg| self.stream_encrypt_in_place(msg, rng))
@@ -206,7 +203,6 @@ impl<S: Suite> PublicKey<S> {
         rng: &mut (impl RngCore + CryptoRng),
     ) -> Result<Vec<u8>, EncError>
     where
-        S::Mac: digest::Mac + cipher::KeyInit,
         S::Enc: cipher::KeyIvInit + cipher::BlockEncryptMut,
     {
         let key_len = <<S::Kem as Kem>::Ciphertext as EncodeExactLen>::encode_output_len();
@@ -242,7 +238,6 @@ impl<S: Suite> PrivateKey<S> {
         message: EncryptedMessage<'m, S>,
     ) -> Result<&'m mut [u8], DecError>
     where
-        S::Mac: digest::Mac + cipher::KeyInit,
         S::Dec: cipher::KeyIvInit + cipher::StreamCipher,
     {
         stream_decrypt_in_place(message, self)
@@ -257,7 +252,6 @@ impl<S: Suite> PrivateKey<S> {
     /// and return a [`Vec`] containing them.
     pub fn stream_decrypt(&self, message: &EncryptedMessage<'_, S>) -> Result<Vec<u8>, DecError>
     where
-        S::Mac: digest::Mac + cipher::KeyInit,
         S::Dec: cipher::KeyIvInit + cipher::StreamCipher,
     {
         let mut msg_bytes = Vec::with_capacity(message.message.len());
@@ -283,7 +277,6 @@ impl<S: Suite> PrivateKey<S> {
         message: EncryptedMessage<'m, S>,
     ) -> Result<&'m mut [u8], DecError>
     where
-        S::Mac: digest::Mac + cipher::KeyInit,
         S::Dec: cipher::KeyIvInit + cipher::BlockDecryptMut,
     {
         block_decrypt_in_place(message, self)
@@ -298,7 +291,6 @@ impl<S: Suite> PrivateKey<S> {
     /// and return a [`Vec`] containing them.
     pub fn block_decrypt(&self, message: &EncryptedMessage<'_, S>) -> Result<Vec<u8>, DecError>
     where
-        S::Mac: digest::Mac + cipher::KeyInit,
         S::Dec: cipher::KeyIvInit + cipher::BlockDecryptMut,
     {
         let mut msg_bytes = Vec::with_capacity(message.message.len());
@@ -340,7 +332,6 @@ fn stream_encrypt_in_place<'m, S, R>(
 where
     R: RngCore + CryptoRng,
     S: Suite,
-    S::Mac: digest::Mac + cipher::KeyInit,
     S::Enc: cipher::KeyIvInit + cipher::StreamCipher,
 {
     // 1. Select ephemeral key pair
@@ -379,7 +370,6 @@ fn block_encrypt_in_place<'m, S: Suite, R>(
 ) -> Result<EncryptedMessage<'m, S>, EncError>
 where
     R: RngCore + CryptoRng,
-    S::Mac: digest::Mac + cipher::KeyInit,
     S::Enc: cipher::KeyIvInit + cipher::BlockEncryptMut,
 {
     // 1. Select ephemeral key pair
@@ -418,7 +408,6 @@ fn stream_decrypt_in_place<'m, S: Suite>(
     d: &PrivateKey<S>,
 ) -> Result<&'m mut [u8], DecError>
 where
-    S::Mac: digest::Mac + cipher::KeyInit,
     S::Dec: cipher::KeyIvInit + cipher::StreamCipher,
 {
     // Byte conversion of step 1 and 2 is done separately
@@ -446,7 +435,7 @@ where
     // 8. Verify MAC
     mac.chain_update(&*m)
         .verify(&tag)
-        .map_err(DecError::MacInvalid)?;
+        .map_err(|_| DecError::MacInvalid)?;
 
     // 9. Decrypt message
     cipher::StreamCipher::try_apply_keystream(&mut cipher, m).map_err(DecError::StreamEnd)?;
@@ -460,7 +449,6 @@ fn block_decrypt_in_place<'m, S: Suite>(
     d: &PrivateKey<S>,
 ) -> Result<&'m mut [u8], DecError>
 where
-    S::Mac: digest::Mac + cipher::KeyInit,
     S::Dec: cipher::KeyIvInit + cipher::BlockDecryptMut,
 {
     // Byte conversion of step 1 and 2 is done separately
@@ -488,7 +476,7 @@ where
     // 8. Verify MAC
     mac.chain_update(&*m)
         .verify(&tag)
-        .map_err(DecError::MacInvalid)?;
+        .map_err(|_| DecError::MacInvalid)?;
 
     // 9. Decrypt message
     let s = cipher::BlockDecryptMut::decrypt_padded_mut::<cipher::block_padding::Pkcs7>(cipher, m)
@@ -588,7 +576,7 @@ pub enum EncError {
 pub enum DecError {
     /// Invalid MAC, caused by tampering with the message or using the wrong key
     #[error("MAC verification failed")]
-    MacInvalid(#[source] digest::MacError),
+    MacInvalid,
     /// Rare error for KDF. May be caused by invalid EC instance
     #[error("KDF failed")]
     Kdf(#[source] crate::kem::InvalidLength),

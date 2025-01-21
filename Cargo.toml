@@ -8,17 +8,18 @@ description = "ECIES encryption scheme for generic parameters"
 readme = "README.md"
 
 categories = ["cryptography"]
-keywords = ["elliptic-curves"]
+keywords = ["elliptic-curves", "ecies", "encryption", "public-key"]
 
 [dependencies]
 generic-ec = { version = "0.4.3", optional = true }
-digest = { version = "0.10" }
-sha2 = { version = "0.10" }
-hkdf = { version = "0.12" }
+digest = { version = "0.10", features = ["mac"] }
 cipher = { version = "0.4", features = ["block-padding"] }
 rand_core = { version = "0.6" }
 
 thiserror = "1"
+
+sha2 = { version = "0.10", optional = true }
+hkdf = { version = "0.12", optional = true }
 
 salsa20 = { version = "0.10", optional = true }
 hmac = { version = "0.12", optional = true }
@@ -33,7 +34,9 @@ rand_dev = "0.1"
 [features]
 default = []
 
-ecdh-prime-group = ["generic-ec"]
+hkdf = ["dep:hkdf", "dep:sha2"]
+
+ecdh-prime-group = ["generic-ec", "hkdf"]
 
 ecdh-secp256k1 = ["ecdh-prime-group", "generic-ec/curve-secp256k1"]
 ecdh-secp256r1 = ["ecdh-prime-group", "generic-ec/curve-secp256r1"]
