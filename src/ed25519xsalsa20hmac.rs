@@ -45,7 +45,7 @@ pub type EncryptedMessage<'m> = crate::EncryptedMessage<'m, S>;
 
 impl PublicKey {
     /// Encrypt the message bytes in place; specialization for
-    /// `curve25519xsalsa20hmac`
+    /// `ed25519xsalsa20hmac`
     ///
     /// You can interact with the encrypted bytes through the returned
     /// [`EncryptedMessage`], but be careful that changing them will invalidate
@@ -61,7 +61,7 @@ impl PublicKey {
     }
 
     /// Encrypt the message bytes into a new buffer. Returnes the encoded bytes
-    /// of [`EncryptedMessage`]. Specialization for `curve25519xsalsa20hmac`
+    /// of [`EncryptedMessage`]. Specialization for `ed25519xsalsa20hmac`
     ///
     /// Convenient alias for [`PublicKey::stream_encrypt`]
     pub fn encrypt(
@@ -75,7 +75,7 @@ impl PublicKey {
 
 impl PrivateKey {
     /// Decrypt the message bytes in place; specialization for
-    /// `curve25519xsalsa20hmac`
+    /// `ed25519xsalsa20hmac`
     ///
     /// When you have a buffer of bytes to decrypt, you first need to parse it
     /// with `EncryptedMessage::from_bytes`, and then decrypt the structure
@@ -91,7 +91,7 @@ impl PrivateKey {
     }
 
     /// Decrypt the message bytes into a new buffer; specialization for
-    /// `curve25519xsalsa20hmac`
+    /// `ed25519xsalsa20hmac`
     ///
     /// When you have a buffer of bytes to decrypt, you first need to parse it
     /// with `EncryptedMessage::from_bytes`, and then decrypt the structure

@@ -67,8 +67,6 @@ pub trait Encoding: Sized {
     type ByteArray: AsRef<[u8]>;
 
     /// Encodes `self` into bytes
-    ///
-    /// Outputs byte string of length [`Encoding::LEN`]
     fn encode(&self) -> Self::ByteArray;
 
     /// Decodes bytes encoding of the type
@@ -80,7 +78,7 @@ pub trait Encoding: Sized {
 /// Encoding has always the same length
 ///
 /// Implementing this trait guarantees that [`Encoding::encode`] always returns a bytestring
-/// of the same length, which is equal to [`encode_output_len()`].
+/// of the same length, which is equal to [`encode_output_len()`](EncodeExactLen::encode_output_len).
 pub trait EncodeExactLen: Encoding {
     /// Length of encoded value
     ///

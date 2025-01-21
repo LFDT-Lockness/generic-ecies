@@ -2,14 +2,14 @@
 //! curves and symmetric ciphers. This implementation is generic in its
 //! components, thanks to using [`generic_ec`] and `RustCrypto` traits. You can
 //! use the ciphersuites defined by us in advance, like
-//! [`curve25519xsalsa20hmac`] and [`curve25519aes128_cbchmac`], or you can
+//! [`ed25519xsalsa20hmac`] and [`ed25519aes128_cbchmac`], or you can
 //! define your own [`Suite`].
 //!
 //! This implementation is based on [SECG
 //! SEC-1](http://www.secg.org/sec1-v2.pdf)
 //!
 //! You can find examples of usage in the predefined ciphersuites:
-//! [`curve25519xsalsa20hmac`] and [`curve25519aes128_cbchmac`]
+//! [`ed25519xsalsa20hmac`] and [`ed25519aes128_cbchmac`]
 
 #![forbid(clippy::disallowed_methods, missing_docs, unsafe_code)]
 #![cfg_attr(not(test), forbid(unused_crate_dependencies))]
@@ -36,7 +36,7 @@ use self::kem::{DecodeOne, EncodeExactLen, Encoding};
 /// Thanks for UC-security, any secure protocols can work together.
 ///
 /// This crate has several suites ready-made, such as
-/// [`curve25519xsalsa20hmac`] and [`curve25519aes128_cbchmac`].
+/// [`ed25519xsalsa20hmac`] and [`ed25519aes128_cbchmac`].
 pub trait Suite: core::fmt::Debug + Eq {
     /// Key Encapsulation Mechanism to be used. See [`kem`].
     type Kem: kem::Kem;

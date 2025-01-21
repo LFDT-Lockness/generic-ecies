@@ -45,7 +45,7 @@ pub type EncryptedMessage<'m> = crate::EncryptedMessage<'m, S>;
 
 impl PublicKey {
     /// Encrypt the message bytes in place; specialization for
-    /// `curve25519aes128_cbchmac`. Uses PKCS7 padding.
+    /// `ed25519aes128_cbchmac`. Uses PKCS7 padding.
     ///
     /// - `message` - the buffer containing the message to encrypt, plus enough
     ///   space for padding
@@ -71,7 +71,7 @@ impl PublicKey {
 
     /// Encrypt the message bytes into a new buffer. Uses PKCS7 padding.
     /// Returnes the encoded bytes of [`EncryptedMessage`]. Specialization for
-    /// `curve25519aes128_cbchmac`
+    /// `ed25519aes128_cbchmac`
     ///
     /// Convenient alias for [`PublicKey::block_encrypt`]
     pub fn encrypt(
@@ -85,7 +85,7 @@ impl PublicKey {
 
 impl PrivateKey {
     /// Decrypt the message bytes in place; specialization for
-    /// `curve25519aes128_cbchmac`. Uses PKCS7 padding.
+    /// `ed25519aes128_cbchmac`. Uses PKCS7 padding.
     ///
     /// When you have a buffer of bytes to decrypt, you first need to parse it
     /// with `EncryptedMessage::from_bytes`, and then decrypt the structure
@@ -101,7 +101,7 @@ impl PrivateKey {
     }
 
     /// Decrypt the message bytes into a new buffer; specialization for
-    /// `curve25519aes128_cbchmac`. Uses PKCS7 padding.
+    /// `ed25519aes128_cbchmac`. Uses PKCS7 padding.
     ///
     /// When you have a buffer of bytes to decrypt, you first need to parse it
     /// with `EncryptedMessage::from_bytes`, and then decrypt the structure
