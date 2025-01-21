@@ -7,7 +7,17 @@ pub use self::ecdh_prime_group::Secp256k1;
 #[cfg(feature = "ecdh-secp256r1")]
 pub use self::ecdh_prime_group::Secp256r1;
 
+#[cfg(feature = "ecdh-x25519")]
+pub use self::x25519::X25519;
+
 /// Key Encapsulation Mechanism (KEM) used in ECIES
+///
+/// KEM allows one party, who knows a public key of the other, to generate (encapsulate) and send a high-entropy
+/// value over public communication channel such as only owner of the secret key can open (decapsulate) the
+/// high-entropy value, which can then be used to derive symmetric encryption keys.
+///
+/// ECIES is instantiated with KEM based on Elliptic-Curve Diffie-Hellman (ECDH). We provide standard ECDH based
+/// on [secp256k1](Secp256k1), [secp256r1](Secp256r1) and [x25519](X25519) curves.
 pub trait Kem {
     /// Public key
     type PublicKey: Encoding + Clone + Eq + core::fmt::Debug;
@@ -113,6 +123,9 @@ pub mod ecdh_prime_group {
     #[cfg(feature = "ecdh-secp256r1")]
     pub type Secp256r1 = EcdhPrimeGroup<generic_ec::curves::Secp256r1>;
     /// ECDH in prime subgroup of ed25519 curve
+    ///
+    /// **Warning:** this ECDH is non-standard. Prefer using [X25519](super::X25519) which is
+    /// standard and more efficient.
     #[cfg(feature = "ecdh-ed25519")]
     pub type Ed25519 = EcdhPrimeGroup<generic_ec::curves::Ed25519>;
 
@@ -208,6 +221,80 @@ pub mod ecdh_prime_group {
             SecretScalar::from_be_bytes(encoding)
                 .ok()
                 .and_then(NonZero::from_secret_scalar)
+        }
+    }
+}
+
+#[cfg(feature = "ecdh-x25519")]
+mod x25519 {
+    use super::{DecodeOne, EncodeExactLen, Encoding, Kem};
+
+    /// ECDH on X25519 curve as defined in [RFC7748](https://datatracker.ietf.org/doc/html/rfc7748)
+    pub struct X25519;
+
+    impl Kem for X25519 {
+        type PublicKey = x25519::PublicKey;
+        type SecretKey = x25519::StaticSecret;
+        type Ciphertext = x25519::PublicKey;
+        type KdfOutput = hkdf::Hkdf<sha2::Sha256>;
+
+        fn keygen(rng: &mut impl rand_core::CryptoRngCore) -> Self::SecretKey {
+            x25519::StaticSecret::random_from_rng(rng)
+        }
+
+        fn get_public_key(secret_key: &Self::SecretKey) -> Self::PublicKey {
+            secret_key.into()
+        }
+
+        fn encaps(
+            rng: &mut impl rand_core::CryptoRngCore,
+            public_key: &Self::PublicKey,
+        ) -> (Self::Ciphertext, Self::KdfOutput) {
+            let local_sk = x25519::StaticSecret::random_from_rng(rng);
+            let ciphertext: x25519::PublicKey = (&local_sk).into();
+            let shared_secret = local_sk.diffie_hellman(public_key);
+            let kdf_output = hkdf::Hkdf::<sha2::Sha256>::new(None, &shared_secret.to_bytes());
+            (ciphertext, kdf_output)
+        }
+
+        fn decaps(secret_key: &Self::SecretKey, ciphertext: &Self::Ciphertext) -> Self::KdfOutput {
+            let shared_secret = secret_key.diffie_hellman(ciphertext);
+            hkdf::Hkdf::<sha2::Sha256>::new(None, &shared_secret.to_bytes())
+        }
+    }
+
+    impl Encoding for x25519::PublicKey {
+        type ByteArray = [u8; 32];
+        fn encode(&self) -> Self::ByteArray {
+            self.to_bytes()
+        }
+        fn decode(encoding: &[u8]) -> Option<Self> {
+            let encoding: [u8; 32] = encoding.try_into().ok()?;
+            Self::try_from(encoding).ok()
+        }
+    }
+    impl EncodeExactLen for x25519::PublicKey {
+        fn encode_output_len() -> usize {
+            32
+        }
+    }
+    impl DecodeOne for x25519::PublicKey {
+        fn decode_one(bytes: &[u8]) -> Option<(Self, usize)> {
+            const N: usize = 32;
+            let key_bytes = bytes.first_chunk::<{ N }>()?;
+            let key = Self::try_from(*key_bytes).ok()?;
+            Some((key, N))
+        }
+    }
+
+    impl Encoding for x25519::StaticSecret {
+        type ByteArray = [u8; 32];
+        fn encode(&self) -> Self::ByteArray {
+            self.to_bytes()
+        }
+        fn decode(encoding: &[u8]) -> Option<Self> {
+            let encoding: [u8; 32] = encoding.try_into().ok()?;
+            Self::try_from(encoding).ok()
         }
     }
 }
