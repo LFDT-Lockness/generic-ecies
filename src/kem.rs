@@ -270,7 +270,7 @@ mod x25519 {
         }
         fn decode(encoding: &[u8]) -> Option<Self> {
             let encoding: [u8; 32] = encoding.try_into().ok()?;
-            Self::try_from(encoding).ok()
+            Some(Self::from(encoding))
         }
     }
     impl EncodeExactLen for x25519::PublicKey {
@@ -282,7 +282,7 @@ mod x25519 {
         fn decode_one(bytes: &[u8]) -> Option<(Self, usize)> {
             const N: usize = 32;
             let key_bytes = bytes.first_chunk::<{ N }>()?;
-            let key = Self::try_from(*key_bytes).ok()?;
+            let key = Self::from(*key_bytes);
             Some((key, N))
         }
     }
@@ -294,7 +294,7 @@ mod x25519 {
         }
         fn decode(encoding: &[u8]) -> Option<Self> {
             let encoding: [u8; 32] = encoding.try_into().ok()?;
-            Self::try_from(encoding).ok()
+            Some(Self::from(encoding))
         }
     }
 }
