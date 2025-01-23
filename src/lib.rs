@@ -334,10 +334,10 @@ where
     S: Suite,
     S::Enc: cipher::KeyIvInit + cipher::StreamCipher,
 {
-    // 1. Select ephemeral key pair
+    // Steps 1-4 are done within Kem::encaps
     let (r, z) = S::Kem::encaps(rng, &q.0);
 
-    // Steps 3-6 encapsulated in KEM
+    // Steps 5-6: given KDF output `z`, derive cipher and mac keys
     let mut cipher_key = cipher::Key::<S::Enc>::default();
     let mut mac_key = cipher::Key::<S::Mac>::default();
     derive_keys_from_kdf_output::<S::Kem>(z, &mut cipher_key, &mut mac_key)
@@ -372,10 +372,10 @@ where
     R: RngCore + CryptoRng,
     S::Enc: cipher::KeyIvInit + cipher::BlockEncryptMut,
 {
-    // 1. Select ephemeral key pair
+    // Steps 1-4 are done within Kem::encaps
     let (r, z) = S::Kem::encaps(rng, &q.0);
 
-    // Steps 3-6 encapsulated in KEM
+    // Steps 5-6: given KDF output `z`, derive cipher and mac keys
     let mut cipher_key = cipher::Key::<S::Enc>::default();
     let mut mac_key = cipher::Key::<S::Mac>::default();
     derive_keys_from_kdf_output::<S::Kem>(z, &mut cipher_key, &mut mac_key)
@@ -420,8 +420,10 @@ where
     // verification steps outlined in 3.2.2.1 of SECG SEC-1 (including non-zero
     // point) are encoded in types and thus are achieved by construction
 
-    // Steps 4-7 encapsulated in KEM
+    // Steps 4-6 are done within KEM::decaps
     let z = S::Kem::decaps(&d.0, &r);
+
+    // Step 7: given KDF output `z`, derive cipher and mac keys
     let mut cipher_key = cipher::Key::<S::Dec>::default();
     let mut mac_key = cipher::Key::<S::Mac>::default();
     derive_keys_from_kdf_output::<S::Kem>(z, &mut cipher_key, &mut mac_key)
@@ -461,8 +463,10 @@ where
     // verification steps outlined in 3.2.2.1 of SECG SEC-1 (including non-zero
     // point) are encoded in types and thus are achieved by construction
 
-    // Steps 4-7 encapsulated in KEM
+    // Steps 4-6 are done within KEM::decaps
     let z = S::Kem::decaps(&d.0, &r);
+
+    // Step 7: given KDF output `z`, derive cipher and mac keys
     let mut cipher_key = cipher::Key::<S::Dec>::default();
     let mut mac_key = cipher::Key::<S::Mac>::default();
     derive_keys_from_kdf_output::<S::Kem>(z, &mut cipher_key, &mut mac_key)

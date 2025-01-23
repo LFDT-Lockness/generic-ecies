@@ -38,6 +38,9 @@ pub trait Kem {
     ///
     /// Takes cryptographic source of randomness, a public key, and performs key encapsulation.
     /// Returns a ciphertext to be sent to counterparty, and a shared secret.
+    ///
+    /// Encapsulation carries out steps 1-4 from 5.1.3 Encryption Operation as defined in [SECG
+    /// SEC-1](http://www.secg.org/sec1-v2.pdf)
     fn encaps(
         rng: &mut impl rand_core::CryptoRngCore,
         public_key: &Self::PublicKey,
@@ -47,6 +50,9 @@ pub trait Kem {
     ///
     /// Takes the secret key, the ciphertext received from the counterparty, and performs key
     /// decapsulation. Returns `None` if ciphertext is invalid, otherwise returns a shared secret.
+    ///
+    /// Decapsulation carries out steps 4-6 from 5.1.4 Decryption Operation as defined in [SECG
+    /// SEC-1](http://www.secg.org/sec1-v2.pdf)
     fn decaps(secret_key: &Self::SecretKey, ciphertext: &Self::Ciphertext) -> Self::KdfOutput;
 }
 
@@ -154,9 +160,19 @@ pub mod ecdh_prime_group {
             rng: &mut impl rand_core::CryptoRngCore,
             public_key: &Self::PublicKey,
         ) -> (Self::Ciphertext, Self::KdfOutput) {
+            // Step 1. Select an ephemeral key pair
             let eph_key = NonZero::<SecretScalar<E>>::random(rng);
             let ciphertext = Point::generator() * &eph_key;
+            // Step 2. Choose whether to use point compression - our implementation enforces
+            // point compression when `ciphertext` is encoded
+
+            // Step 3. Carry out DH in prime (sub)group of the curve
             let shared_secret = public_key * &eph_key;
+
+            // Step 4. Output `KDF(shared_secret)`
+            // Note: shared_secret is serialized as compressed form of the point, which is
+            // actually contradicts SEC1 spec that says that we have to hash an X-coordinate
+            // of `shared_secret`.
             let kdf_output =
                 hkdf::Hkdf::<sha2::Sha256>::new(None, shared_secret.to_bytes(true).as_ref());
             (ciphertext, kdf_output)
