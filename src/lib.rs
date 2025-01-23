@@ -517,7 +517,7 @@ impl<'m, S: Suite> EncryptedMessage<'m, S> {
 
         let bytes = bytes
             .get_mut(eph_key_len..)
-            .ok_or(DeserializeError::BugEphKey)?;
+            .ok_or(DeserializeError::CiphertextDecodeOneBuggyImpl)?;
 
         let tag_len = <MacSize<S> as cipher::typenum::Unsigned>::USIZE;
         let tag_pos = bytes
@@ -600,8 +600,8 @@ pub enum DeserializeError {
     #[error("parse eph key")]
     ParseEphKey,
     /// [`DecodeOne`] implementation is buggy
-    #[error("eph key is smaller than reported by KEM")]
-    BugEphKey,
+    #[error("DecodeOne impl for Kem::Ciphertext is buggy: it returned wrong length")]
+    CiphertextDecodeOneBuggyImpl,
     /// Message is too small to fit a tag
     #[error("message to small, there's no tag")]
     NoTag,
