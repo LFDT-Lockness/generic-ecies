@@ -101,23 +101,30 @@ macro_rules! make_tests {
             }
 
             #[test]
-            fn from_bytes_empty() {
-                let mut bytes = vec![];
-                let result = super::EncryptedMessage::from_bytes(&mut bytes);
-                assert!(
-                    matches!(result, Err(crate::DeserializeError::WrongLen)),
-                    "expected WrongLen, got {result:?}",
-                );
-            }
-
-            #[test]
             fn from_bytes_too_short() {
-                let mut bytes = vec![0u8; 5];
-                let result = super::EncryptedMessage::from_bytes(&mut bytes);
-                assert!(
-                    matches!(result, Err(crate::DeserializeError::WrongLen)),
-                    "expected WrongLen, got {result:?}",
-                );
+                let compressed_len = generic_ec::Point::<E>::serialized_len(true);
+                let tag_len =
+                    cipher::generic_array::GenericArray::<u8, crate::MacSize<super::S>>::default()
+                        .len();
+                // Minimum valid length is point + tag (message can be empty)
+                let min_valid_len = compressed_len + tag_len;
+
+                for len in 0..min_valid_len {
+                    let mut bytes = vec![0u8; len];
+                    let result = super::EncryptedMessage::from_bytes(&mut bytes);
+                    assert!(
+                        result.is_err(),
+                        "expected error for input length {len}, got {result:?}",
+                    );
+                    // Inputs shorter than the compressed point length must return TooShort.
+                    // Longer inputs may fail with InvalidPoint instead, which is also correct.
+                    if len < compressed_len {
+                        assert!(
+                            matches!(result, Err(crate::DeserializeError::TooShort)),
+                            "expected TooShort for input length {len}, got {result:?}",
+                        );
+                    }
+                }
             }
 
             internal_make_specific_tests!($specific_tests);

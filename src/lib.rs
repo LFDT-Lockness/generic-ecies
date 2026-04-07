@@ -545,14 +545,14 @@ impl<'m, S: Suite> EncryptedMessage<'m, S> {
         let (point_len, ephemeral_key) = match generic_ec::Point::<S::E>::from_bytes(
             bytes
                 .get(..compressed_len)
-                .ok_or(DeserializeError::WrongLen)?,
+                .ok_or(DeserializeError::TooShort)?,
         ) {
             Ok(point) => (compressed_len, point),
             Err(e1) => {
                 // Compressed parsing failed, try uncompressed
                 let len = generic_ec::Point::<S::E>::serialized_len(false);
                 match generic_ec::Point::<S::E>::from_bytes(
-                    bytes.get(..len).ok_or(DeserializeError::WrongLen)?,
+                    bytes.get(..len).ok_or(DeserializeError::TooShort)?,
                 ) {
                     Ok(point) => (len, point),
                     Err(e2) => return Err(DeserializeError::InvalidPoint(e1, e2)),
@@ -564,9 +564,9 @@ impl<'m, S: Suite> EncryptedMessage<'m, S> {
 
         // Ensure the buffer is large enough to contain the point, tag, and message
         let tag_len = GenericArray::<u8, MacSize<S>>::default().len();
-        let tag_start = l.checked_sub(tag_len).ok_or(DeserializeError::WrongLen)?;
+        let tag_start = l.checked_sub(tag_len).ok_or(DeserializeError::TooShort)?;
         if tag_start < point_len {
-            return Err(DeserializeError::WrongLen);
+            return Err(DeserializeError::TooShort);
         }
         let tag = &bytes[tag_start..];
         let tag = GenericArray::<u8, MacSize<S>>::clone_from_slice(tag);
@@ -651,5 +651,5 @@ pub enum DeserializeError {
     ZeroPoint(#[from] generic_ec::errors::ZeroPoint),
     /// Input buffer is too short to contain a valid message
     #[error("Input buffer is too short")]
-    WrongLen,
+    TooShort,
 }
