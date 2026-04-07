@@ -100,6 +100,26 @@ macro_rules! make_tests {
                 assert_eq!(pubkey, pubkey_);
             }
 
+            #[test]
+            fn from_bytes_empty() {
+                let mut bytes = vec![];
+                let result = super::EncryptedMessage::from_bytes(&mut bytes);
+                assert!(
+                    matches!(result, Err(crate::DeserializeError::WrongLen)),
+                    "expected WrongLen, got {result:?}",
+                );
+            }
+
+            #[test]
+            fn from_bytes_too_short() {
+                let mut bytes = vec![0u8; 5];
+                let result = super::EncryptedMessage::from_bytes(&mut bytes);
+                assert!(
+                    matches!(result, Err(crate::DeserializeError::WrongLen)),
+                    "expected WrongLen, got {result:?}",
+                );
+            }
+
             internal_make_specific_tests!($specific_tests);
         }
     };

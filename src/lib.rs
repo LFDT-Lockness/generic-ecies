@@ -540,26 +540,38 @@ impl<'m, S: Suite> EncryptedMessage<'m, S> {
         // Followint SECG SEC-1 part 5.1.4, byte representation is a
         // concatenation of component represenatations. Care must be taken
         // to parse the point correctly if it's compressed or not.
+        // Try to parse the ephemeral key, first as compressed, then as uncompressed
         let compressed_len = generic_ec::Point::<S::E>::serialized_len(true);
-        let (point_len, ephemeral_key) =
-            match generic_ec::Point::<S::E>::from_bytes(&bytes[..compressed_len]) {
-                Ok(point) => (compressed_len, point),
-                Err(e1) => {
-                    let len = generic_ec::Point::<S::E>::serialized_len(false);
-                    match generic_ec::Point::<S::E>::from_bytes(&bytes[..len]) {
-                        Ok(point) => (len, point),
-                        Err(e2) => return Err(DeserializeError::InvalidPoint(e1, e2)),
-                    }
+        let (point_len, ephemeral_key) = match generic_ec::Point::<S::E>::from_bytes(
+            bytes
+                .get(..compressed_len)
+                .ok_or(DeserializeError::WrongLen)?,
+        ) {
+            Ok(point) => (compressed_len, point),
+            Err(e1) => {
+                // Compressed parsing failed, try uncompressed
+                let len = generic_ec::Point::<S::E>::serialized_len(false);
+                match generic_ec::Point::<S::E>::from_bytes(
+                    bytes.get(..len).ok_or(DeserializeError::WrongLen)?,
+                ) {
+                    Ok(point) => (len, point),
+                    Err(e2) => return Err(DeserializeError::InvalidPoint(e1, e2)),
                 }
-            };
+            }
+        };
         let ephemeral_key =
             generic_ec::NonZero::<generic_ec::Point<S::E>>::try_from(ephemeral_key)?;
 
+        // Ensure the buffer is large enough to contain the point, tag, and message
         let tag_len = GenericArray::<u8, MacSize<S>>::default().len();
-        let tag = &bytes[(l - tag_len)..];
+        let tag_start = l.checked_sub(tag_len).ok_or(DeserializeError::WrongLen)?;
+        if tag_start < point_len {
+            return Err(DeserializeError::WrongLen);
+        }
+        let tag = &bytes[tag_start..];
         let tag = GenericArray::<u8, MacSize<S>>::clone_from_slice(tag);
 
-        let message = &mut bytes[point_len..(l - tag_len)];
+        let message = &mut bytes[point_len..tag_start];
 
         Ok(EncryptedMessage {
             ephemeral_key,
@@ -637,4 +649,7 @@ pub enum DeserializeError {
     /// Failed to read [`EncryptedMessage::ephemeral_key`]
     #[error("Ephemeral DH key is zero")]
     ZeroPoint(#[from] generic_ec::errors::ZeroPoint),
+    /// Input buffer is too short to contain a valid message
+    #[error("Input buffer is too short")]
+    WrongLen,
 }
