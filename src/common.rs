@@ -102,28 +102,42 @@ macro_rules! make_tests {
 
             #[test]
             fn from_bytes_too_short() {
+                let mut rng = rand_dev::DevRng::new();
+                let valid_point = generic_ec::Point::generator()
+                    * generic_ec::NonZero::<generic_ec::Scalar<E>>::random(&mut rng);
+
                 let compressed_len = generic_ec::Point::<E>::serialized_len(true);
+                let uncompressed_len = generic_ec::Point::<E>::serialized_len(false);
                 let tag_len =
                     cipher::generic_array::GenericArray::<u8, crate::MacSize<super::S>>::default()
                         .len();
-                // Minimum valid length is point + tag (message can be empty)
-                let min_valid_len = compressed_len + tag_len;
 
-                for len in 0..min_valid_len {
-                    let mut bytes = vec![0u8; len];
-                    let result = super::EncryptedMessage::from_bytes(&mut bytes);
+                // Test with compressed point: valid_point ++ zero_tag
+                let compressed_bytes = valid_point.to_bytes(true);
+                let mut buf = Vec::with_capacity(compressed_len + tag_len);
+                buf.extend_from_slice(&compressed_bytes);
+                buf.extend_from_slice(&vec![0u8; tag_len]);
+                for i in 0..(compressed_len + tag_len) {
+                    let result =
+                        super::EncryptedMessage::from_bytes(&mut buf[..i]);
                     assert!(
-                        result.is_err(),
-                        "expected error for input length {len}, got {result:?}",
+                        matches!(result, Err(crate::DeserializeError::TooShort)),
+                        "expected TooShort for compressed input length {i}, got {result:?}",
                     );
-                    // Inputs shorter than the compressed point length must return TooShort.
-                    // Longer inputs may fail with InvalidPoint instead, which is also correct.
-                    if len < compressed_len {
-                        assert!(
-                            matches!(result, Err(crate::DeserializeError::TooShort)),
-                            "expected TooShort for input length {len}, got {result:?}",
-                        );
-                    }
+                }
+
+                // Test with uncompressed point: valid_point ++ zero_tag
+                let uncompressed_bytes = valid_point.to_bytes(false);
+                let mut buf = Vec::with_capacity(uncompressed_len + tag_len);
+                buf.extend_from_slice(&uncompressed_bytes);
+                buf.extend_from_slice(&vec![0u8; tag_len]);
+                for i in uncompressed_len..(uncompressed_len + tag_len) {
+                    let result =
+                        super::EncryptedMessage::from_bytes(&mut buf[..i]);
+                    assert!(
+                        matches!(result, Err(crate::DeserializeError::TooShort)),
+                        "expected TooShort for uncompressed input length {i}, got {result:?}",
+                    );
                 }
             }
 
