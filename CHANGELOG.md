@@ -1,6 +1,6 @@
 ## v0.2.0
 
-- Fixed panic in `EncryptedMessage::from_bytes` when given zero-length or too-short input (#7)
+- Fixed panic in `EncryptedMessage::from_bytes` when given zero-length or too-short input
 
 ## v0.1.0
 
