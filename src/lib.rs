@@ -542,23 +542,24 @@ impl<'m, S: Suite> EncryptedMessage<'m, S> {
         // to parse the point correctly if it's compressed or not.
         // Try to parse the ephemeral key, first as compressed, then as uncompressed
         let compressed_len = generic_ec::Point::<S::E>::serialized_len(true);
-        let (point_len, ephemeral_key) = match generic_ec::Point::<S::E>::from_bytes(
-            bytes
-                .get(..compressed_len)
-                .ok_or(DeserializeError::TooShort)?,
-        ) {
-            Ok(point) => (compressed_len, point),
-            Err(e1) => {
-                // Compressed parsing failed, try uncompressed
-                let len = generic_ec::Point::<S::E>::serialized_len(false);
-                match generic_ec::Point::<S::E>::from_bytes(
-                    bytes.get(..len).ok_or(DeserializeError::TooShort)?,
-                ) {
-                    Ok(point) => (len, point),
-                    Err(e2) => return Err(DeserializeError::InvalidPoint(e1, e2)),
+        let compressed_slice = bytes
+            .get(..compressed_len)
+            .ok_or(DeserializeError::TooShort)?;
+        let (point_len, ephemeral_key) =
+            match generic_ec::Point::<S::E>::from_bytes(compressed_slice) {
+                Ok(point) => (compressed_len, point),
+                Err(e1) => {
+                    // Compressed parsing failed, try uncompressed
+                    let uncompressed_len = generic_ec::Point::<S::E>::serialized_len(false);
+                    let uncompressed_slice = bytes
+                        .get(..uncompressed_len)
+                        .ok_or(DeserializeError::TooShort)?;
+                    match generic_ec::Point::<S::E>::from_bytes(uncompressed_slice) {
+                        Ok(point) => (uncompressed_len, point),
+                        Err(e2) => return Err(DeserializeError::InvalidPoint(e1, e2)),
+                    }
                 }
-            }
-        };
+            };
         let ephemeral_key =
             generic_ec::NonZero::<generic_ec::Point<S::E>>::try_from(ephemeral_key)?;
 
