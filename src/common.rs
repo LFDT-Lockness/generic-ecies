@@ -100,6 +100,36 @@ macro_rules! make_tests {
                 assert_eq!(pubkey, pubkey_);
             }
 
+            #[test]
+            fn from_bytes_too_short() {
+                let point = generic_ec::Point::<E>::generator().to_point();
+                let tag =
+                    cipher::generic_array::GenericArray::<u8, crate::MacSize<super::S>>::default();
+
+                // Test with compressed point: point ++ zero_tag
+                let mut buf = point.to_bytes(true).to_vec();
+                let compressed_len = buf.len();
+                buf.extend_from_slice(&tag);
+                for i in 0..buf.len() {
+                    let result = super::EncryptedMessage::from_bytes(&mut buf[..i]);
+                    assert!(
+                        matches!(result, Err(crate::DeserializeError::TooShort)),
+                        "expected TooShort for compressed input length {i}, got {result:?}",
+                    );
+                }
+
+                // Test with uncompressed point: point ++ zero_tag
+                let mut buf = point.to_bytes(false).to_vec();
+                buf.extend_from_slice(&tag);
+                for i in compressed_len..buf.len() {
+                    let result = super::EncryptedMessage::from_bytes(&mut buf[..i]);
+                    assert!(
+                        matches!(result, Err(crate::DeserializeError::TooShort)),
+                        "expected TooShort for uncompressed input length {i}, got {result:?}",
+                    );
+                }
+            }
+
             internal_make_specific_tests!($specific_tests);
         }
     };
