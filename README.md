@@ -1,3 +1,5 @@
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/LFDT-Lockness/generic-ecies/badge)](https://scorecard.dev/viewer/?uri=github.com/LFDT-Lockness/generic-ecies)
+
 # generic-ecies
 
 ECIES is a scheme for efficient ciphers with asymmetric key using elliptic
