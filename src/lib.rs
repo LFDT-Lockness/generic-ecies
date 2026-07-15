@@ -601,6 +601,7 @@ fn with_copy<S: Suite>(
 ///
 /// [`EncError::PadError`] may happen when an invalid size buffer is supplied for in-place
 /// encryption. Other errors should happen in very rare cases.
+#[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum EncError {
     /// Rare error for KDF. May be caused by invalid EC instance
@@ -619,6 +620,7 @@ pub enum EncError {
 /// Error when encrypting message
 ///
 /// Most errors can happen when a message has been tampered with.
+#[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum DecError {
     /// Invalid MAC, caused by tampering with the message or using the wrong key
@@ -637,6 +639,7 @@ pub enum DecError {
 }
 
 /// Error when deserializing the byte representation of a message
+#[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum DeserializeError {
     /// Failed to read [`EncryptedMessage::ephemeral_key`]
