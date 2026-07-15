@@ -219,7 +219,6 @@ impl<S: Suite> PublicKey<S> {
         let mac_len = <MacSize<S> as cipher::typenum::Unsigned>::USIZE;
         let msg_len = message.len();
         let pad_len = pad_size::<S>(msg_len);
-        eprintln!("encrypting message {} with padding {}", msg_len, pad_len);
 
         let mut bytes = vec![0; key_len + msg_len + pad_len + mac_len];
         bytes[key_len..(key_len + msg_len)].copy_from_slice(message);
@@ -331,14 +330,14 @@ fn ecies_kem<E: Curve>(
     // Step 3 in encryption, step 4 in decruption: Use ECDH without small
     // cofactor, as in generic-ec all scalars are guaranteed to be in the prime
     // order subgroup
-    let z: generic_ec::NonZero<_> = k * q;
+    let z: generic_ec::NonZero<_> = (k * q).into_secret();
     // No need to check the point for zero, it's guaranteed by construction
 
     // 4 in enc, 5 in dec: convert z to octet string
     let z_bs = z.to_bytes(true);
 
     // 5-6 in enc, 6-7 in dec: use KDF to produce keys for encryption and mac
-    let kdf = hkdf::Hkdf::<sha2::Sha256>::new(None, &z_bs);
+    let kdf = hkdf::Hkdf::<sha2::Sha256>::new(None, z_bs.as_nonsecret_bytes());
     let mut all_bytes = vec![0u8; cipher_key.len() + mac_key.len()];
 
     kdf.expand(b"generic-ecies cipher and mac", &mut all_bytes)?;
@@ -507,7 +506,6 @@ where
         .map_err(DecError::MacInvalid)?;
 
     // 9. Decrypt message
-    eprintln!("decrypting length {}", m.len());
     let s = cipher::BlockDecryptMut::decrypt_padded_mut::<cipher::block_padding::Pkcs7>(cipher, m)
         .map_err(DecError::PadError)?;
     let len_without_padding = s.len();
@@ -603,6 +601,7 @@ fn with_copy<S: Suite>(
 ///
 /// [`EncError::PadError`] may happen when an invalid size buffer is supplied for in-place
 /// encryption. Other errors should happen in very rare cases.
+#[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum EncError {
     /// Rare error for KDF. May be caused by invalid EC instance
@@ -621,6 +620,7 @@ pub enum EncError {
 /// Error when encrypting message
 ///
 /// Most errors can happen when a message has been tampered with.
+#[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum DecError {
     /// Invalid MAC, caused by tampering with the message or using the wrong key
@@ -639,6 +639,7 @@ pub enum DecError {
 }
 
 /// Error when deserializing the byte representation of a message
+#[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum DeserializeError {
     /// Failed to read [`EncryptedMessage::ephemeral_key`]

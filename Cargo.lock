@@ -66,6 +66,7 @@ checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
 dependencies = [
  "crypto-common",
  "inout",
+ "zeroize",
 ]
 
 [[package]]
@@ -220,9 +221,9 @@ dependencies = [
 
 [[package]]
 name = "generic-ec"
-version = "0.4.3"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50e3268b3f97e2046ebf69e24a1e7e12dad4dec247d87f59268fd57ab514b5f8"
+checksum = "f076ac0f904af9f744d2fbd06a0f4dac31d051d64b3d0f3f725545a8a9336d2c"
 dependencies = [
  "curve25519-dalek",
  "generic-ec-core",
@@ -238,9 +239,9 @@ dependencies = [
 
 [[package]]
 name = "generic-ec-core"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "049128cc67cac6176ada5218e294ce46421470d92a7340c93d5cfd3ecfbc29a4"
+checksum = "ffea0573b3bdde9a0bbbf17433b19f9628942e075d723702c2f495f0a2f65268"
 dependencies = [
  "generic-array",
  "rand_core",
@@ -251,9 +252,9 @@ dependencies = [
 
 [[package]]
 name = "generic-ec-curves"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e663405a17b229dede990904edcfd2056cf6641f1240869a1f44fa13bd4ee4d"
+checksum = "ffbc925fd3e3679dc46eb028029be23f3eb215f9392847d10223d853a459ab3c"
 dependencies = [
  "curve25519-dalek",
  "generic-ec-core",
@@ -265,7 +266,7 @@ dependencies = [
 
 [[package]]
 name = "generic-ecies"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "aes",
  "cbc",
