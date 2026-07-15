@@ -219,7 +219,6 @@ impl<S: Suite> PublicKey<S> {
         let mac_len = <MacSize<S> as cipher::typenum::Unsigned>::USIZE;
         let msg_len = message.len();
         let pad_len = pad_size::<S>(msg_len);
-        eprintln!("encrypting message {} with padding {}", msg_len, pad_len);
 
         let mut bytes = vec![0; key_len + msg_len + pad_len + mac_len];
         bytes[key_len..(key_len + msg_len)].copy_from_slice(message);
@@ -507,7 +506,6 @@ where
         .map_err(DecError::MacInvalid)?;
 
     // 9. Decrypt message
-    eprintln!("decrypting length {}", m.len());
     let s = cipher::BlockDecryptMut::decrypt_padded_mut::<cipher::block_padding::Pkcs7>(cipher, m)
         .map_err(DecError::PadError)?;
     let len_without_padding = s.len();
