@@ -331,14 +331,14 @@ fn ecies_kem<E: Curve>(
     // Step 3 in encryption, step 4 in decruption: Use ECDH without small
     // cofactor, as in generic-ec all scalars are guaranteed to be in the prime
     // order subgroup
-    let z: generic_ec::NonZero<_> = k * q;
+    let z: generic_ec::NonZero<_> = (k * q).into_secret();
     // No need to check the point for zero, it's guaranteed by construction
 
     // 4 in enc, 5 in dec: convert z to octet string
     let z_bs = z.to_bytes(true);
 
     // 5-6 in enc, 6-7 in dec: use KDF to produce keys for encryption and mac
-    let kdf = hkdf::Hkdf::<sha2::Sha256>::new(None, &z_bs);
+    let kdf = hkdf::Hkdf::<sha2::Sha256>::new(None, z_bs.as_nonsecret_bytes());
     let mut all_bytes = vec![0u8; cipher_key.len() + mac_key.len()];
 
     kdf.expand(b"generic-ecies cipher and mac", &mut all_bytes)?;
