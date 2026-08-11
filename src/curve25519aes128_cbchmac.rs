@@ -66,7 +66,7 @@ impl PublicKey {
         data_len: usize,
         rng: &mut (impl rand_core::RngCore + rand_core::CryptoRng),
     ) -> Result<EncryptedMessage<'m>, crate::EncError> {
-        self.block_encrypt_in_place(message, data_len, rng)
+        self.block_encrypt_in_place(message, data_len, &[], rng)
     }
 
     /// Encrypt the message bytes into a new buffer. Uses PKCS7 padding.
@@ -97,7 +97,7 @@ impl PrivateKey {
         &self,
         message: EncryptedMessage<'m>,
     ) -> Result<&'m mut [u8], crate::DecError> {
-        self.block_decrypt_in_place(message)
+        self.block_decrypt_in_place(message, &[])
     }
 
     /// Decrypt the message bytes into a new buffer; specialization for
