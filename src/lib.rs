@@ -431,15 +431,18 @@ where
     cipher::StreamCipher::try_apply_keystream(&mut cipher, m).map_err(EncError::StreamEnd)?;
 
     // 8. MAC-tag the message with SharedInfo2 (aad) and its length suffix
-    // per SEC 1 §5.1.3 step 8. When aad is empty the output matches the
-    // current implementation exactly.
-    let aad_len = (aad.len() as u16).to_be_bytes();
-    let d = mac
-        .chain_update(&*m)
-        .chain_update(aad)
-        .chain_update(aad_len)
-        .finalize()
-        .into_bytes();
+    // per SEC 1 §5.1.3 step 8. When aad is empty, SharedInfo2 is omitted
+    // to preserve wire-format compatibility with ciphertexts produced
+    // before SharedInfo support was added.
+    let d = {
+        let mac = mac.chain_update(&*m);
+        if !aad.is_empty() {
+            let aad_len = (aad.len() as u16).to_be_bytes();
+            mac.chain_update(aad).chain_update(aad_len).finalize().into_bytes()
+        } else {
+            mac.finalize().into_bytes()
+        }
+    };
 
     // 9. Output as structured message. Byte conversion is done separately
     Ok(EncryptedMessage {
@@ -485,13 +488,17 @@ where
     .map_err(EncError::PadError)?;
 
     // 8. MAC-tag the message with SharedInfo2 (aad) and its length suffix
-    let aad_len = (aad.len() as u16).to_be_bytes();
-    let d = mac
-        .chain_update(&*m)
-        .chain_update(aad)
-        .chain_update(aad_len)
-        .finalize()
-        .into_bytes();
+    // When aad is empty, SharedInfo2 is omitted to preserve wire-format
+    // compatibility with ciphertexts produced before SharedInfo support.
+    let d = {
+        let mac = mac.chain_update(&*m);
+        if !aad.is_empty() {
+            let aad_len = (aad.len() as u16).to_be_bytes();
+            mac.chain_update(aad).chain_update(aad_len).finalize().into_bytes()
+        } else {
+            mac.finalize().into_bytes()
+        }
+    };
 
     // 9. Output as structured message. Byte conversion is done separately
     Ok(EncryptedMessage {
@@ -532,12 +539,18 @@ where
     let mac: S::Mac = digest::Mac::new(&mac_key);
 
     // 8. Verify MAC with SharedInfo2 (aad) and its length suffix
-    let aad_len = (aad.len() as u16).to_be_bytes();
-    mac.chain_update(&*m)
-        .chain_update(aad)
-        .chain_update(aad_len)
-        .verify(&tag)
-        .map_err(DecError::MacInvalid)?;
+    if !aad.is_empty() {
+        let aad_len = (aad.len() as u16).to_be_bytes();
+        mac.chain_update(&*m)
+            .chain_update(aad)
+            .chain_update(aad_len)
+            .verify(&tag)
+            .map_err(DecError::MacInvalid)?;
+    } else {
+        mac.chain_update(&*m)
+            .verify(&tag)
+            .map_err(DecError::MacInvalid)?;
+    }
 
     // 9. Decrypt message
     cipher::StreamCipher::try_apply_keystream(&mut cipher, m).map_err(DecError::StreamEnd)?;
@@ -577,12 +590,18 @@ where
     let mac: S::Mac = digest::Mac::new(&mac_key);
 
     // 8. Verify MAC with SharedInfo2 (aad) and its length suffix
-    let aad_len = (aad.len() as u16).to_be_bytes();
-    mac.chain_update(&*m)
-        .chain_update(aad)
-        .chain_update(aad_len)
-        .verify(&tag)
-        .map_err(DecError::MacInvalid)?;
+    if !aad.is_empty() {
+        let aad_len = (aad.len() as u16).to_be_bytes();
+        mac.chain_update(&*m)
+            .chain_update(aad)
+            .chain_update(aad_len)
+            .verify(&tag)
+            .map_err(DecError::MacInvalid)?;
+    } else {
+        mac.chain_update(&*m)
+            .verify(&tag)
+            .map_err(DecError::MacInvalid)?;
+    }
 
     // 9. Decrypt message
     let s = cipher::BlockDecryptMut::decrypt_padded_mut::<cipher::block_padding::Pkcs7>(cipher, m)
