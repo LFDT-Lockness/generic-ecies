@@ -43,6 +43,16 @@ pub trait Suite {
     /// Decryption corresponding to `Enc`. For stream cipher will usually be
     /// the same as `Enc`
     type Dec;
+
+    /// Optional shared information fed into the KDF as the `info` argument
+    /// (SEC 1 v2.0 §5.1.3 step 5). Defined per ciphersuite.
+    ///
+    /// Returns `None` for existing ciphersuites to preserve
+    /// backward-compatibility. Future ciphersuites (e.g. hybrid PQC) may
+    /// return `Some(b"X25519+ML-KEM768")` to domain-separate KDF output.
+    fn shared_info1() -> Option<&'static [u8]> {
+        None
+    }
 }
 
 pub(crate) type MacSize<S> = <<S as Suite>::Mac as digest::OutputSizeUser>::OutputSize;
@@ -144,19 +154,23 @@ impl<S: Suite> PublicKey<S> {
     /// Encrypt the message bytes in place. Variant for suites with stream
     /// ciphers.
     ///
+    /// `associated_data` is bound into the MAC as `SharedInfo2` per SEC 1
+    /// §5.1.3 step 8. Pass `&[]` to preserve the current behaviour.
+    ///
     /// You can interact with the encrypted bytes through the returned
     /// [`EncryptedMessage`], but be careful that changing them will invalidate
     /// the mac.
     pub fn stream_encrypt_in_place<'m>(
         &self,
         message: &'m mut [u8],
+        associated_data: &[u8],
         rng: &mut (impl RngCore + CryptoRng),
     ) -> Result<EncryptedMessage<'m, S>, EncError>
     where
         S::Mac: digest::Mac + cipher::KeyInit,
         S::Enc: cipher::KeyIvInit + cipher::StreamCipher,
     {
-        stream_encrypt_in_place::<S, _>(message, &self.point, rng)
+        stream_encrypt_in_place::<S, _>(message, associated_data, &self.point, rng)
     }
 
     /// Encrypt the message bytes in place. Variant for suites with block
@@ -165,6 +179,8 @@ impl<S: Suite> PublicKey<S> {
     /// - `message` - the buffer containing the message to encrypt, plus enough
     ///   space for padding
     /// - `data_len` - length of the message in the buffer
+    /// - `associated_data` - bound into the MAC as `SharedInfo2`; pass `&[]`
+    ///   to preserve the current behaviour
     ///
     /// Given a message `m`, the size of the buffer should be at least `m.len() +
     /// pad_size(m.len())`. If the buffer size is too small, the function will
@@ -177,13 +193,14 @@ impl<S: Suite> PublicKey<S> {
         &self,
         message: &'m mut [u8],
         data_len: usize,
+        associated_data: &[u8],
         rng: &mut (impl RngCore + CryptoRng),
     ) -> Result<EncryptedMessage<'m, S>, EncError>
     where
         S::Mac: digest::Mac + cipher::KeyInit,
         S::Enc: cipher::KeyIvInit + cipher::BlockEncryptMut,
     {
-        block_encrypt_in_place::<S, _>(message, data_len, &self.point, rng)
+        block_encrypt_in_place::<S, _>(message, data_len, associated_data, &self.point, rng)
     }
 
     /// Encrypt the message bytes into a new buffer. Variant for suites with
@@ -199,7 +216,7 @@ impl<S: Suite> PublicKey<S> {
         S::Mac: digest::Mac + cipher::KeyInit,
         S::Enc: cipher::KeyIvInit + cipher::StreamCipher,
     {
-        with_copy(message, |msg| self.stream_encrypt_in_place(msg, rng))
+        with_copy(message, |msg| self.stream_encrypt_in_place(msg, &[], rng))
     }
 
     /// Encrypt the message bytes into a new buffer. Variant for suites with
@@ -227,7 +244,7 @@ impl<S: Suite> PublicKey<S> {
 
         let EncryptedMessage {
             ephemeral_key, tag, ..
-        } = self.block_encrypt_in_place(message_slice, msg_len, rng)?;
+        } = self.block_encrypt_in_place(message_slice, msg_len, &[], rng)?;
 
         bytes[..key_len].copy_from_slice(&ephemeral_key.to_bytes(true));
         bytes[(key_len + msg_len + pad_len)..].copy_from_slice(&tag);
@@ -239,6 +256,9 @@ impl<S: Suite> PrivateKey<S> {
     /// Decrypt the message bytes in place. Variant for suites with stream
     /// ciphers.
     ///
+    /// `associated_data` must match what was passed at encryption time.
+    /// Pass `&[]` if no associated data was used.
+    ///
     /// When you have a buffer of bytes to decrypt, you first need to parse it
     /// with `EncryptedMessage::from_bytes`, and then decrypt the structure
     /// using this funciton. It will modify the bytes in the buffer and return a
@@ -246,12 +266,13 @@ impl<S: Suite> PrivateKey<S> {
     pub fn stream_decrypt_in_place<'m>(
         &self,
         message: EncryptedMessage<'m, S>,
+        associated_data: &[u8],
     ) -> Result<&'m mut [u8], DecError>
     where
         S::Mac: digest::Mac + cipher::KeyInit,
         S::Dec: cipher::KeyIvInit + cipher::StreamCipher,
     {
-        stream_decrypt_in_place(message, &self.scalar)
+        stream_decrypt_in_place(message, associated_data, &self.scalar)
     }
 
     /// Decrypt the message bytes into a new buffer. Variant for suites with
@@ -273,12 +294,15 @@ impl<S: Suite> PrivateKey<S> {
             tag: message.tag.clone(),
             message: &mut msg_bytes,
         };
-        let _ = self.stream_decrypt_in_place(msg)?;
+        let _ = self.stream_decrypt_in_place(msg, &[])?;
         Ok(msg_bytes)
     }
 
     /// Decrypt the message bytes in place. Variant for suites with block
     /// ciphers. Uses PKCS7 padding.
+    ///
+    /// `associated_data` must match what was passed at encryption time.
+    /// Pass `&[]` if no associated data was used.
     ///
     /// When you have a buffer of bytes to decrypt, you first need to parse it
     /// with `EncryptedMessage::from_bytes`, and then decrypt the structure
@@ -287,12 +311,13 @@ impl<S: Suite> PrivateKey<S> {
     pub fn block_decrypt_in_place<'m>(
         &self,
         message: EncryptedMessage<'m, S>,
+        associated_data: &[u8],
     ) -> Result<&'m mut [u8], DecError>
     where
         S::Mac: digest::Mac + cipher::KeyInit,
         S::Dec: cipher::KeyIvInit + cipher::BlockDecryptMut,
     {
-        block_decrypt_in_place(message, &self.scalar)
+        block_decrypt_in_place(message, associated_data, &self.scalar)
     }
 
     /// Decrypt the message bytes into a new buffer. Variant for suites with
@@ -314,10 +339,34 @@ impl<S: Suite> PrivateKey<S> {
             tag: message.tag.clone(),
             message: &mut msg_bytes,
         };
-        let s = self.block_decrypt_in_place(msg)?;
+        let s = self.block_decrypt_in_place(msg, &[])?;
         let len_without_pad = s.len();
         msg_bytes.truncate(len_without_pad);
         Ok(msg_bytes)
+    }
+}
+
+/// Plaintext or ciphertext with optional associated data (SharedInfo2).
+///
+/// Mirrors the `aead::Payload` pattern: callers that do not need associated
+/// data can pass `&[u8]` directly via the `From` impl; callers that do need it
+/// construct a `Payload` explicitly.
+///
+/// `aad` maps to `SharedInfo2` from SEC 1 §5.1.3 step 8: it is concatenated
+/// into the MAC together with a two-byte big-endian length suffix, ensuring
+/// the MAC commits to both the ciphertext and the application-provided context.
+/// When `aad` is empty the MAC output is identical to the current
+/// implementation, preserving backward-compatibility.
+pub struct Payload<'msg, 'aad> {
+    /// The message to encrypt or decrypt
+    pub msg: &'msg [u8],
+    /// Associated data (SharedInfo2) bound into the MAC
+    pub aad: &'aad [u8],
+}
+
+impl<'msg> From<&'msg [u8]> for Payload<'msg, 'static> {
+    fn from(msg: &'msg [u8]) -> Self {
+        Payload { msg, aad: b"" }
     }
 }
 
@@ -326,6 +375,7 @@ fn ecies_kem<E: Curve>(
     k: &generic_ec::NonZero<generic_ec::SecretScalar<E>>,
     cipher_key: &mut [u8],
     mac_key: &mut [u8],
+    shared_info1: Option<&[u8]>,
 ) -> Result<(), hkdf::InvalidLength> {
     // Step 3 in encryption, step 4 in decruption: Use ECDH without small
     // cofactor, as in generic-ec all scalars are guaranteed to be in the prime
@@ -336,8 +386,9 @@ fn ecies_kem<E: Curve>(
     // 4 in enc, 5 in dec: convert z to octet string
     let z_bs = z.to_bytes(true);
 
-    // 5-6 in enc, 6-7 in dec: use KDF to produce keys for encryption and mac
-    let kdf = hkdf::Hkdf::<sha2::Sha256>::new(None, z_bs.as_nonsecret_bytes());
+    // 5-6 in enc, 6-7 in dec: use KDF to produce keys for encryption and mac.
+    // SharedInfo1 is fed as the `info` argument per SEC 1 §5.1.3 step 5.
+    let kdf = hkdf::Hkdf::<sha2::Sha256>::new(shared_info1, z_bs.as_nonsecret_bytes());
     let mut all_bytes = vec![0u8; cipher_key.len() + mac_key.len()];
 
     kdf.expand(b"generic-ecies cipher and mac", &mut all_bytes)?;
@@ -349,6 +400,7 @@ fn ecies_kem<E: Curve>(
 
 fn stream_encrypt_in_place<'m, S, R>(
     m: &'m mut [u8],
+    aad: &[u8],
     q: &generic_ec::NonZero<generic_ec::Point<S::E>>,
     rng: &mut R,
 ) -> Result<EncryptedMessage<'m, S>, EncError>
@@ -367,7 +419,8 @@ where
     // Steps 3-6 encapsulated in KEM
     let mut cipher_key = cipher::Key::<S::Enc>::default();
     let mut mac_key = cipher::Key::<S::Mac>::default();
-    ecies_kem(*q, &k, &mut cipher_key, &mut mac_key).map_err(EncError::Kdf)?;
+    ecies_kem(*q, &k, &mut cipher_key, &mut mac_key, S::shared_info1())
+        .map_err(EncError::Kdf)?;
 
     // Use zero IV since the key never repeats
     let cipher_iv = cipher::Iv::<S::Enc>::default();
@@ -377,8 +430,19 @@ where
     // 7. Encrypt message
     cipher::StreamCipher::try_apply_keystream(&mut cipher, m).map_err(EncError::StreamEnd)?;
 
-    // 8. MAC-tag the message
-    let d = mac.chain_update(&*m).finalize().into_bytes();
+    // 8. MAC-tag the message with SharedInfo2 (aad) and its length suffix
+    // per SEC 1 §5.1.3 step 8. When aad is empty, SharedInfo2 is omitted
+    // to preserve wire-format compatibility with ciphertexts produced
+    // before SharedInfo support was added.
+    let d = {
+        let mac = mac.chain_update(&*m);
+        if !aad.is_empty() {
+            let aad_len = (aad.len() as u16).to_be_bytes();
+            mac.chain_update(aad).chain_update(aad_len).finalize().into_bytes()
+        } else {
+            mac.finalize().into_bytes()
+        }
+    };
 
     // 9. Output as structured message. Byte conversion is done separately
     Ok(EncryptedMessage {
@@ -391,6 +455,7 @@ where
 fn block_encrypt_in_place<'m, S: Suite, R>(
     m: &'m mut [u8],
     data_len: usize,
+    aad: &[u8],
     q: &generic_ec::NonZero<generic_ec::Point<S::E>>,
     rng: &mut R,
 ) -> Result<EncryptedMessage<'m, S>, EncError>
@@ -408,7 +473,8 @@ where
     // Steps 3-6 encapsulated in KEM
     let mut cipher_key = cipher::Key::<S::Enc>::default();
     let mut mac_key = cipher::Key::<S::Mac>::default();
-    ecies_kem(*q, &k, &mut cipher_key, &mut mac_key).map_err(EncError::Kdf)?;
+    ecies_kem(*q, &k, &mut cipher_key, &mut mac_key, S::shared_info1())
+        .map_err(EncError::Kdf)?;
 
     // Use zero IV since the key never repeats
     let cipher_iv = cipher::Iv::<S::Enc>::default();
@@ -421,8 +487,18 @@ where
     )
     .map_err(EncError::PadError)?;
 
-    // 8. MAC-tag the message
-    let d = mac.chain_update(&*m).finalize().into_bytes();
+    // 8. MAC-tag the message with SharedInfo2 (aad) and its length suffix
+    // When aad is empty, SharedInfo2 is omitted to preserve wire-format
+    // compatibility with ciphertexts produced before SharedInfo support.
+    let d = {
+        let mac = mac.chain_update(&*m);
+        if !aad.is_empty() {
+            let aad_len = (aad.len() as u16).to_be_bytes();
+            mac.chain_update(aad).chain_update(aad_len).finalize().into_bytes()
+        } else {
+            mac.finalize().into_bytes()
+        }
+    };
 
     // 9. Output as structured message. Byte conversion is done separately
     Ok(EncryptedMessage {
@@ -434,6 +510,7 @@ where
 
 fn stream_decrypt_in_place<'m, S: Suite>(
     message: EncryptedMessage<'m, S>,
+    aad: &[u8],
     d: &generic_ec::NonZero<generic_ec::SecretScalar<S::E>>,
 ) -> Result<&'m mut [u8], DecError>
 where
@@ -453,17 +530,27 @@ where
     // Steps 4-7 encapsulated in KEM
     let mut cipher_key = cipher::Key::<S::Dec>::default();
     let mut mac_key = cipher::Key::<S::Mac>::default();
-    ecies_kem(r, d, &mut cipher_key, &mut mac_key).map_err(DecError::Kdf)?;
+    ecies_kem(r, d, &mut cipher_key, &mut mac_key, S::shared_info1())
+        .map_err(DecError::Kdf)?;
 
     // Use zero IV since the key never repeats
     let cipher_iv = cipher::Iv::<S::Dec>::default();
     let mut cipher: S::Dec = cipher::KeyIvInit::new(&cipher_key, &cipher_iv);
     let mac: S::Mac = digest::Mac::new(&mac_key);
 
-    // 8. Verify MAC
-    mac.chain_update(&*m)
-        .verify(&tag)
-        .map_err(DecError::MacInvalid)?;
+    // 8. Verify MAC with SharedInfo2 (aad) and its length suffix
+    if !aad.is_empty() {
+        let aad_len = (aad.len() as u16).to_be_bytes();
+        mac.chain_update(&*m)
+            .chain_update(aad)
+            .chain_update(aad_len)
+            .verify(&tag)
+            .map_err(DecError::MacInvalid)?;
+    } else {
+        mac.chain_update(&*m)
+            .verify(&tag)
+            .map_err(DecError::MacInvalid)?;
+    }
 
     // 9. Decrypt message
     cipher::StreamCipher::try_apply_keystream(&mut cipher, m).map_err(DecError::StreamEnd)?;
@@ -474,6 +561,7 @@ where
 
 fn block_decrypt_in_place<'m, S: Suite>(
     message: EncryptedMessage<'m, S>,
+    aad: &[u8],
     d: &generic_ec::NonZero<generic_ec::SecretScalar<S::E>>,
 ) -> Result<&'m mut [u8], DecError>
 where
@@ -493,17 +581,27 @@ where
     // Steps 4-7 encapsulated in KEM
     let mut cipher_key = cipher::Key::<S::Dec>::default();
     let mut mac_key = cipher::Key::<S::Mac>::default();
-    ecies_kem(r, d, &mut cipher_key, &mut mac_key).map_err(DecError::Kdf)?;
+    ecies_kem(r, d, &mut cipher_key, &mut mac_key, S::shared_info1())
+        .map_err(DecError::Kdf)?;
 
     // Use zero IV since the key never repeats
     let cipher_iv = cipher::Iv::<S::Dec>::default();
     let cipher: S::Dec = cipher::KeyIvInit::new(&cipher_key, &cipher_iv);
     let mac: S::Mac = digest::Mac::new(&mac_key);
 
-    // 8. Verify MAC
-    mac.chain_update(&*m)
-        .verify(&tag)
-        .map_err(DecError::MacInvalid)?;
+    // 8. Verify MAC with SharedInfo2 (aad) and its length suffix
+    if !aad.is_empty() {
+        let aad_len = (aad.len() as u16).to_be_bytes();
+        mac.chain_update(&*m)
+            .chain_update(aad)
+            .chain_update(aad_len)
+            .verify(&tag)
+            .map_err(DecError::MacInvalid)?;
+    } else {
+        mac.chain_update(&*m)
+            .verify(&tag)
+            .map_err(DecError::MacInvalid)?;
+    }
 
     // 9. Decrypt message
     let s = cipher::BlockDecryptMut::decrypt_padded_mut::<cipher::block_padding::Pkcs7>(cipher, m)

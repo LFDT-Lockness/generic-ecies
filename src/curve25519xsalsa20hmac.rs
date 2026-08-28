@@ -57,7 +57,7 @@ impl PublicKey {
         message: &'m mut [u8],
         rng: &mut (impl rand_core::RngCore + rand_core::CryptoRng),
     ) -> Result<EncryptedMessage<'m>, crate::EncError> {
-        self.stream_encrypt_in_place(message, rng)
+        self.stream_encrypt_in_place(message, &[], rng)
     }
 
     /// Encrypt the message bytes into a new buffer. Returnes the encoded bytes
@@ -87,7 +87,7 @@ impl PrivateKey {
         &self,
         message: EncryptedMessage<'m>,
     ) -> Result<&'m mut [u8], crate::DecError> {
-        self.stream_decrypt_in_place(message)
+        self.stream_decrypt_in_place(message, &[])
     }
 
     /// Decrypt the message bytes into a new buffer; specialization for
